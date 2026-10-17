@@ -2710,8 +2710,8 @@ impl Vst3Plugin for PejvakRvbPlugin {
 impl ClapPlugin for PejvakRvbPlugin {
     const CLAP_ID: &'static str = "com.pejvakdsp.pejvak-rvb";
     const CLAP_DESCRIPTION: Option<&'static str> = Some("PEJVAK RVB – Hybrid Algorithmic Reverb");
-    const CLAP_MANUAL_URL: Option<&'static str> = Some("https://arena.ai");
-    const CLAP_SUPPORT_URL: Option<&'static str> = Some("https://arena.ai");
+    const CLAP_MANUAL_URL: Option<&'static str> = Some("https://github.com/Pejvak-DSP");
+    const CLAP_SUPPORT_URL: Option<&'static str> = Some("https://github.com/Pejvak-DSP");
     const CLAP_FEATURES: &'static [ClapFeature] = &[
         ClapFeature::AudioEffect,
         ClapFeature::Reverb,
