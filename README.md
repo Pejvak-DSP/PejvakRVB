@@ -29,6 +29,7 @@
 ## ✨ Features
 
 ### 🌌 Dual Engine Architecture
+
 Switch seamlessly between two distinct worlds of reverb:
 
 | Engine | Character | Highlights |
@@ -39,7 +40,9 @@ Switch seamlessly between two distinct worlds of reverb:
 *Switching engines instantly clears the departing engine's buffers, ensuring zero bleed-over from stale tails.*
 
 ### 🎨 Texture Rack (6 Layers)
+
 Available on **both** engines. Drag the chips in the Signal Chain to reorder them:
+
 - **Shimmer:** Granular pitch shifter inside a feedback loop.
 - **Mist:** Short modulated delay with light feedback.
 - **Drift:** Very slow pitch wobble.
@@ -47,12 +50,14 @@ Available on **both** engines. Drag the chips in the Signal Chain to reorder the
 - **Scatter:** Overlapping grains with random start positions.
 - **Bloom:** Slow-rising reverse-reverb character.
 
-*Every layer features a 20ms anti-click smoother and resets its buffers on the rising edge from zero.*
+*Every layer features a 20 ms anti-click smoother and resets its buffers on the rising edge from zero.*
 
 ### 🔮 ILLUSION — Granular Cloud
+
 A beautiful granular cloud with pitched overtones. Features 8 parameters (Spark, Still, Aura, Veil, Wide, Tint, Rate, Grain) and 8 independent anti-click techniques, including Catmull-Rom cubic interpolation and soft-clip saturation.
 
 ### 🚀 Everything Else
+
 - 🕹️ **Drag-and-Drop Signal Chain** with smooth animations and cursor feedback.
 - ↩️ **Undo / Redo:** 50 steps with parameter-name tooltips.
 - 🛑 **TX Kill Switch:** One-click master switch for all texture layers.
@@ -91,40 +96,59 @@ A beautiful granular cloud with pitched overtones. Features 8 parameters (Spark,
 ## 📦 Installation
 
 ### 🪟 Windows
+
 Copy the plugin to the standard system folders:
+
 ```powershell
 # CLAP
 Copy-Item Pejvak_RVB.clap "C:\Program Files\Common Files\CLAP\"
+
 # VST3
 New-Item -ItemType Directory -Force -Path "C:\Program Files\Common Files\VST3\PEJVAK RVB"
 Copy-Item Pejvak_RVB.vst3 "C:\Program Files\Common Files\VST3\PEJVAK RVB\"
+```
 
-🍎 macOS (Universal Binary)
+### 🍎 macOS (Universal Binary)
+
 Runs natively on both Intel and Apple Silicon.
 
-bash
+```bash
 cp -R "PEJVAK RVB.vst3" ~/Library/Audio/Plug-Ins/VST3/
 cp -R "Pejvak_RVB.clap" ~/Library/Audio/Plug-Ins/CLAP/
-Note: If macOS blocks the plugin, go to System Settings → Privacy & Security → Open Anyway.
+```
 
-🐧 Linux
-bash
+> **Note:** If macOS blocks the plugin, go to **System Settings → Privacy & Security → Open Anyway**.
+
+### 🐧 Linux
+
+```bash
+# VST3
 mkdir -p ~/.vst3/"PEJVAK RVB.vst3"/Contents/x86_64-linux
 cp "PEJVAK RVB.vst3/Contents/x86_64-linux/PEJVAK RVB.so" ~/.vst3/"PEJVAK RVB.vst3"/Contents/x86_64-linux/
+
+# CLAP
 mkdir -p ~/.clap
 cp Pejvak_RVB.clap ~/.clap/
-🛠️ Building from Source
-Ensure you have Rust 1.98+ installed.
-(Linux users also need X11 and OpenGL development libraries).
+```
 
-bash
+---
+
+## 🛠️ Building from Source
+
+Ensure you have **Rust 1.98+** installed.
+(Linux users also need X11 and OpenGL development libraries.)
+
+```bash
 git clone https://github.com/Pejvak-DSP/PejvakRVB.git
 cd PejvakRVB
 cargo nice-plug bundle Pejvak_RVB --release
-The bundled plugins will appear in target/bundled/.
+```
 
-🍏 macOS Universal Binary
-bash
+The bundled plugins will appear in `target/bundled/`.
+
+### 🍏 macOS Universal Binary
+
+```bash
 rustup target add aarch64-apple-darwin x86_64-apple-darwin
 cargo build --target aarch64-apple-darwin --release
 cargo build --target x86_64-apple-darwin --release
@@ -134,8 +158,13 @@ lipo -create \
   target/aarch64-apple-darwin/release/libPejvak_RVB.dylib \
   target/x86_64-apple-darwin/release/libPejvak_RVB.dylib \
   -output target/universal/release/libPejvak_RVB.dylib
-🧱 Project Structure
-text
+```
+
+---
+
+## 🧱 Project Structure
+
+```text
 PejvakRVB/
 ├── fdn_reverb_core/        ← Pure DSP core (CloudSeed, FFDN, Textures)
 │   └── src/
@@ -150,25 +179,38 @@ PejvakRVB/
 │       └── presets.rs      ← 96 factory presets
 ├── manual/                 ← Bundled HTML manual + logo
 └── Cargo.toml              ← Workspace root
-🙏 Credits
+```
+
+---
+
+## 🙏 Credits
+
 PEJVAK RVB stands on the shoulders of giants. Huge thanks to:
 
-CloudSeed — Valdemar Erlingsson (The original C++ reference)
+- **CloudSeed** — Valdemar Erlingsson (the original C++ reference)
+- **CloudReverb** — xunil-cloud (JUCE fork & modern parameter layout)
+- **FFDN Theory** — Fagerström et al. (DAFx 2020) and Schlecht & Habets (IEEE TSP 2017)
+- **Granular Design** — Curtis Roads, *Microsound* (MIT Press, 2001)
 
-CloudReverb — xunil-cloud (JUCE fork & modern parameter layout)
+Built with ❤️ using Rust, `nice-plug`, `egui`, and `wide`.
 
-FFDN Theory — Fagerström et al. (DAFx 2020) and Schlecht & Habets (IEEE TSP 2017).
+---
 
-Granular Design — Curtis Roads, Microsound (MIT Press, 2001).
+## 📄 License
 
-Built with ❤️ using Rust, nice-plug, egui, and wide.
+This project is licensed under the **GNU General Public License v3.0 or later**.
 
-📄 License
-This project is licensed under the GNU General Public License v3.0 or later.
-
-text
+```text
 Copyright (C) 2025 Pejvak DSP
 Author: Amin Yousefinejad
-See the LICENSE file for the full text.
+```
 
-<div align="center"> <b>Pejvak DSP</b> · Designed & developed by <b>Amin Yousefinejad</b> <br> <i>Made with ♥ for the audio community.</i> </div> ```
+See the [LICENSE](LICENSE) file for the full text.
+
+<div align="center">
+
+**Pejvak DSP** · Designed & developed by **Amin Yousefinejad**
+
+<i>Made with ♥ for the audio community.</i>
+
+</div>
