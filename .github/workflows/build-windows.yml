@@ -1,0 +1,41 @@
+name: Build Windows
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger only when a version tag is pushed
+
+permissions:
+  contents: write # Grant permission to create a Release
+
+jobs:
+  build-windows:
+    runs-on: windows-latest # Use the latest Windows virtual machine
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install cargo-nice-plug
+        run: cargo install cargo-nice-plug
+
+      # Build the plugin for Windows
+      - name: Build Plugin
+        run: cargo nice-plug bundle Pejvak_RVB --release
+
+      # Zip the bundled folder using PowerShell
+      - name: Package Plugins
+        run: |
+          Compress-Archive -Path target/bundled/* -DestinationPath PEJVAK_RVB_Windows.zip
+
+      # Upload to GitHub Releases automatically
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: PEJVAK_RVB_Windows.zip
+          generate_release_notes: true
