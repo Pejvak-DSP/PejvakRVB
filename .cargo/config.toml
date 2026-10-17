@@ -1,0 +1,13 @@
+# PEJVAK RVB – build configuration
+#
+# `target-cpu=native` lets LLVM use the host CPU's full instruction set
+# (AVX2, FMA, AVX-512, ...) for auto-vectorization. This is *bit-exact*
+# with the scalar version because Rust's default FP mode is strict
+# IEEE-754: LLVM is not allowed to reorder or fuse FP operations. It can
+# only pack independent operations into wider registers.
+#
+# Do NOT distribute binaries built with this file – they will only run on
+# CPUs with the same feature set. Remove or comment out for distribution.
+
+[build]
+rustflags = ["-C", "target-cpu=native"]

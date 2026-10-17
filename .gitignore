@@ -1,0 +1,35 @@
+# ---- Rust ----
+/target/
+**/*.rs.bk
+
+# ---- Build artifacts ----
+*.dll
+*.so
+*.dylib
+*.vst3/
+*.clap/
+/bundled/
+*.log
+build.log
+
+# ---- Backup / temp ----
+*.bak
+*.tmp
+*.swp
+*~
+
+# ---- OS files ----
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ---- IDE ----
+.vscode/
+.idea/
+*.iml
+.vs/

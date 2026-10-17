@@ -1,0 +1,1464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PEJVAK RVB — User Manual</title>
+<style>
+:root {
+  --bg: #0a0f1e;
+  --bg-2: #131a30;
+  --bg-3: #1c2540;
+  --card: #161e36;
+  --header-bg: rgba(10, 15, 30, 0.82);
+  --header-h: 180px;  /* updated at runtime by JS */
+  --fg: #e6eaf4;
+  --fg-2: #8d97b0;
+  --fg-3: #5e6882;
+  --accent: #67e8f9;
+  --accent-2: #6ea8fe;
+  --accent-3: #c492ff;
+  --warn: #ff8c42;
+  --ok: #7ddb88;
+  --border: #252e48;
+  --radius: 8px;
+  --mono: 'SF Mono', 'Cascadia Code', 'Consolas', 'Menlo', monospace;
+  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+:root.light {
+  --bg: #f5f7fa;
+  --bg-2: #ffffff;
+  --bg-3: #eef1f5;
+  --card: #ffffff;
+  --header-bg: rgba(245, 247, 250, 0.82);
+  --fg: #1d2129;
+  --fg-2: #4d535f;
+  --fg-3: #777e8c;
+  --accent: #0c8599;
+  --accent-2: #1a73e8;
+  --accent-3: #8b3df5;
+  --warn: #e8590c;
+  --ok: #0e9f6e;
+  --border: #d5dae2;
+}
+* { box-sizing: border-box; }
+html {
+  scroll-behavior: smooth;
+  /* Offset anchor navigation by the actual header height so a
+     clicked TOC link lands below the sticky header rather than
+     underneath it. `--header-h` is kept up to date by the JS at
+     the bottom of this file. */
+  scroll-padding-top: calc(var(--header-h) + 16px);
+}
+body {
+  margin: 0;
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--fg);
+  background: var(--bg);
+  transition: background 0.25s, color 0.25s;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  max-width: 1400px;
+  margin: 0 auto;
+  min-height: 100vh;
+}
+/* ---- Sidebar ---- */
+aside {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--bg-2);
+  padding: 24px 0;
+}
+aside::-webkit-scrollbar { width: 8px; }
+aside::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.brand {
+  padding: 0 24px 20px;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: var(--accent);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+  text-align: center;
+}
+.brand-logo {
+  display: block;
+  width: 100%;
+  max-width: 170px;
+  height: auto;
+  margin: 0 auto 14px;
+  /* The logo is white on transparent, so it reads well on the dark
+     sidebar as-is. In light mode we invert it to keep the same
+     contrast. */
+}
+:root.light .brand-logo {
+  filter: invert(1);
+}
+.brand small {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  color: var(--fg-3);
+  font-weight: 500;
+  margin-top: 2px;
+}
+nav { padding: 0 12px; }
+nav a {
+  display: block;
+  padding: 6px 12px;
+  color: var(--fg-2);
+  text-decoration: none;
+  font-size: 13px;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+  transition: all 0.15s;
+}
+nav a:hover { color: var(--fg); background: var(--bg-3); }
+nav a.active {
+  color: var(--accent);
+  background: var(--bg-3);
+  border-left-color: var(--accent);
+}
+nav a.sub { padding-left: 28px; font-size: 12.5px; }
+/* ---- Main ---- */
+main { padding: 0 64px 120px; max-width: 900px; }
+
+/* Sticky header: stays pinned to the top of the viewport while the
+   document scrolls. The negative horizontal margin extends the
+   background to the full width of `main` so no content bleeds
+   through the padding; the backdrop-filter gives a subtle frosted
+   glass effect so the header remains readable over any content. */
+   header.top {
+     position: sticky;
+     top: 0;
+     z-index: 100;
+     margin: 0 -64px 40px -64px;
+     padding: 32px 64px 16px 64px;
+     /* Semi-transparent background — the blur behind it creates the
+        "frosted glass" effect the user requested. `saturate(140%)`
+        makes the blurred content feel more vivid, which reads as
+        more "glassy" than plain blur alone. */
+     background: var(--header-bg);
+     border-bottom: 1px solid var(--border);
+     backdrop-filter: blur(12px) saturate(140%);
+     -webkit-backdrop-filter: blur(12px) saturate(140%);
+     transition: background 0.25s, border-color 0.25s;
+   }
+h1 {
+  font-size: 32px;
+  margin: 0 0 8px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+.meta {
+  color: var(--fg-3);
+  font-size: 13px;
+  font-family: var(--mono);
+}
+.toolbar {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-decoration: none;
+}
+.btn:hover { background: var(--bg-3); border-color: var(--accent-2); color: var(--accent-2); }
+.search-wrap { position: relative; flex: 1; min-width: 260px; max-width: 480px; }
+.search-wrap input {
+  width: 100%;
+  padding: 7px 78px 7px 32px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.search-wrap input:focus { border-color: var(--accent-2); }
+.search-wrap::before {
+  content: '⌕';
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--fg-3);
+  font-size: 15px;
+  pointer-events: none;
+}
+/* Result counter inside the input, on the right. */
+.search-count {
+  position: absolute;
+  right: 62px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--fg-3);
+  pointer-events: none;
+}
+/* Prev / next navigation arrows. */
+.search-nav {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 2px;
+}
+.search-nav button {
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg-2);
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  padding: 0;
+}
+.search-nav button:hover:not(:disabled) {
+  background: var(--bg-3);
+  border-color: var(--accent-2);
+  color: var(--accent-2);
+}
+.search-nav button:disabled { opacity: 0.35; cursor: not-allowed; }
+.search-info {
+  font-size: 12px;
+  color: var(--fg-3);
+  margin-left: 8px;
+  align-self: center;
+}
+/* ---- Sections ---- */
+section {
+  margin-bottom: 56px;
+  scroll-margin-top: calc(var(--header-h) + 16px);
+}
+h2 {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0 0 20px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg);
+}
+h3 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 32px 0 12px;
+  color: var(--accent);
+}
+h4 {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 20px 0 8px;
+  color: var(--fg);
+}
+p { margin: 0 0 12px; color: var(--fg-2); }
+p strong { color: var(--fg); font-weight: 600; }
+ul, ol { margin: 0 0 12px; padding-left: 24px; color: var(--fg-2); }
+li { margin-bottom: 4px; }
+li strong { color: var(--fg); }
+a { color: var(--accent-2); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  padding: 2px 6px;
+  background: var(--bg-3);
+  border-radius: 4px;
+  color: var(--accent);
+}
+kbd {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 1px 7px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  color: var(--fg);
+  min-width: 20px;
+  text-align: center;
+}
+/* ---- Cards ---- */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  margin: 16px 0;
+}
+.card-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+/* ---- Callouts ---- */
+.note, .tip, .warn {
+  border-left: 3px solid;
+  padding: 12px 16px;
+  margin: 16px 0;
+  border-radius: 4px;
+  font-size: 14px;
+}
+.note { border-color: var(--accent-2); background: rgba(110, 168, 254, 0.08); }
+.tip { border-color: var(--ok); background: rgba(125, 219, 136, 0.08); }
+.warn { border-color: var(--warn); background: rgba(255, 140, 66, 0.08); }
+.note::before { content: 'ℹ  '; color: var(--accent-2); font-weight: 700; }
+.tip::before { content: '★  '; color: var(--ok); font-weight: 700; }
+.warn::before { content: '⚠  '; color: var(--warn); font-weight: 700; }
+/* ---- Tables ---- */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 13.5px;
+}
+th, td {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+th {
+  color: var(--accent-2);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+td { color: var(--fg-2); }
+td:first-child { color: var(--fg); font-weight: 500; }
+tr:last-child td { border-bottom: none; }
+/* ---- Layout diagrams ---- */
+.diagram {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  overflow-x: auto;
+  color: var(--fg-2);
+  white-space: pre;
+}
+
+/* ---- Keyboard list ---- */
+.keys { list-style: none; padding: 0; }
+.keys li {
+  display: flex;
+  gap: 16px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.keys li:last-child { border-bottom: none; }
+.keys .key { flex: 0 0 140px; color: var(--fg); }
+.keys .desc { color: var(--fg-2); }
+/* ---- Search highlight ---- */
+mark.hit {
+  background: rgba(255, 140, 66, 0.55);
+  color: inherit;
+  padding: 1px 2px;
+  border-radius: 2px;
+  transition: background 0.2s;
+}
+mark.hit.current {
+  background: var(--warn);
+  color: var(--bg);
+  box-shadow: 0 0 0 2px var(--warn);
+}
+
+/* ---- Back to top button ---- */
+#backToTop {
+  position: fixed;
+  bottom: 32px;
+  right: 32px;
+  z-index: 200;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: translateY(10px);
+  pointer-events: none;
+  transition: opacity 0.22s ease, transform 0.22s ease,
+              background 0.22s ease, box-shadow 0.22s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+#backToTop.visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+#backToTop:hover {
+  background: var(--accent-2);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside {
+    position: static;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    max-height: 300px;
+  }
+  main { padding: 0 20px 60px; }
+  h1 { font-size: 26px; }
+  header.top { margin: 0 -20px 32px -20px; padding: 24px 20px 16px 20px; }
+  #backToTop { bottom: 20px; right: 20px; }
+}
+/* ---- Print ---- */
+@media print {
+  aside, .toolbar, nav, #backToTop { display: none !important; }
+  .layout { display: block; }
+  header.top { position: static; margin: 0 0 24px 0; padding: 0 0 16px 0; }
+  main { padding: 0; max-width: 100%; }
+  body { background: #fff; color: #000; }
+  section { page-break-inside: avoid; }
+  a { color: #000; text-decoration: underline; }
+  .card, .note, .tip, .warn { border: 1px solid #ccc; background: #f9f9f9; }
+}
+</style>
+</head>
+<body>
+<div class="layout">
+
+<!-- ============ SIDEBAR ============ -->
+<aside>
+  <div class="brand">
+    <img src="logo.png" alt="PEJVAK DSP" class="brand-logo">
+    PEJVAK RVB
+    <small>User Manual · v1.0.0</small>
+  </div>
+  <nav id="toc">
+    <a href="#intro">1. Introduction</a>
+    
+  <nav id="toc">
+    <a href="#intro">1. Introduction</a>
+    <a href="#install">2. Installation</a>
+    <a href="#building" class="sub">2b. Building from Source</a>
+    <a href="#quickstart">3. Quick Start</a>
+    <a href="#interface">4. Interface Overview</a>
+    <a href="#header" class="sub">4.1 Header</a>
+    <a href="#menu" class="sub">4.2 Menu ☰</a>
+    <a href="#presets" class="sub">4.3 Preset Browser</a>
+    <a href="#undo" class="sub">4.4 Undo / Redo</a>
+    <a href="#cloudseed">5. CloudSeed Engine</a>
+    <a href="#cs-input" class="sub">5.1 INPUT</a>
+    <a href="#cs-multitap" class="sub">5.2 MULTITAP DELAY</a>
+    <a href="#cs-early" class="sub">5.3 EARLY DIFFUSION</a>
+    <a href="#cs-late" class="sub">5.4 LATE DELAY</a>
+    <a href="#cs-latediff" class="sub">5.5 LATE DIFFUSION</a>
+    <a href="#cs-eq" class="sub">5.6 EQ</a>
+    <a href="#cs-route" class="sub">5.7 ROUTE</a>
+    <a href="#cs-mixer" class="sub">5.8 MIXER</a>
+    <a href="#cs-engine" class="sub">5.9 VELVET NOISE</a>
+    <a href="#ffdn">6. FFDN Engine</a>
+    <a href="#ffdn-space" class="sub">6.1 SPACE</a>
+    <a href="#ffdn-network" class="sub">6.2 NETWORK</a>
+    <a href="#ffdn-character" class="sub">6.3 CHARACTER</a>
+    <a href="#ffdn-shelves" class="sub">6.4 SHELVES</a>
+    <a href="#ffdn-modulation" class="sub">6.5 MODULATION</a>
+    <a href="#ffdn-filter" class="sub">6.6 FILTER</a>
+    <a href="#ffdn-dynamics" class="sub">6.7 DYNAMICS</a>
+    <a href="#texture">7. Texture Rack</a>
+    <a href="#chain" class="sub">7.1 SIGNAL CHAIN</a>
+    <a href="#shimmer" class="sub">7.2 SHIMMER</a>
+    <a href="#mist" class="sub">7.3 MIST</a>
+    <a href="#drift" class="sub">7.4 DRIFT</a>
+    <a href="#crystal" class="sub">7.5 CRYSTAL</a>
+    <a href="#scatter" class="sub">7.6 SCATTER</a>
+    <a href="#bloom" class="sub">7.7 BLOOM</a>
+    <a href="#illusion">8. ILLUSION</a>
+    <a href="#tx">9. TX Kill Switch</a>
+    <a href="#presets-library">10. Preset Library</a>
+    <a href="#automation">11. Automation</a>
+    <a href="#trouble">12. Troubleshooting</a>
+    <a href="#credits">13. Credits & License</a>
+  </nav>
+</aside>
+
+<!-- ============ MAIN ============ -->
+<main>
+
+<header class="top">
+  <h1>PEJVAK RVB</h1>
+  <div class="meta">Hybrid Algorithmic Reverb · Version 1.0.0 · GPL-3.0-or-later</div>
+  <div class="toolbar">
+    <div class="search-wrap">
+      <input id="search" type="text" placeholder="Search the manual…" autocomplete="off"
+             aria-label="Search the manual">
+      <span class="search-count" id="searchCount"></span>
+      <div class="search-nav">
+        <button id="searchPrev" title="Previous match (Shift+Enter)" disabled aria-label="Previous match">▲</button>
+        <button id="searchNext" title="Next match (Enter)" disabled aria-label="Next match">▼</button>
+      </div>
+    </div>
+    <span class="search-info" id="searchInfo"></span>
+    <button class="btn" id="themeBtn" title="Toggle light / dark theme">☀ Theme</button>
+    <button class="btn" onclick="window.print()" title="Print or save as PDF">⎙ Print / PDF</button>
+  </div>
+</header>
+
+<!-- ============ 1. INTRODUCTION ============ -->
+<section id="intro">
+<h2>1. Introduction</h2>
+<p><strong>PEJVAK RVB</strong> is a professional algorithmic reverb that combines two completely independent DSP engines in a single plugin. You can switch between them at any time from the header, and each engine has its own layout, character, and set of controls.</p>
+
+<div class="card">
+<div class="card-title">CloudSeed Engine</div>
+<p>A faithful port of Valdemar Erlingsson's <em>CloudSeed</em> (legacy-v1) — 49 parameters, twelve parallel delay lines, deep early-diffusion front-end, and a warm, dense tail. Every arithmetic operation runs in <code>f64</code> and is bit-identical to the original C++ DSP.</p>
+</div>
+
+<div class="card">
+<div class="card-title">FFDN Engine</div>
+<p>A modern Filtered Feedback Delay Network based on Fagerström (DAFx 2020) and Schlecht (IEEE TSP 2017). It reaches comparable echo density with a cleaner signal path, and exposes character controls — cross-feed, Velvet saturation, spectral tilt, and three dynamics stages — that the CloudSeed engine does not have.</p>
+</div>
+
+<h3>On top of the two engines</h3>
+<ul>
+  <li><strong>Texture Rack</strong> — six post-reverb texture layers with click-free enable and reorder. Available on both engines.</li>
+  <li><strong>ILLUSION</strong> — a granular cloud with pitched overtones and eight techniques that keep it click-free.</li>
+  <li><strong>Velvet-Noise VFDN</strong> — a sparse diffusion stage inside the CloudSeed engine.</li>
+  <li><strong>Undo / Redo</strong> — 50 steps with parameter-name tooltips.</li>
+  <li><strong>96 factory presets</strong> across 16 categories.</li>
+</ul>
+</section>
+
+<!-- ============ 2. INSTALLATION ============ -->
+<section id="install">
+<h2>2. Installation</h2>
+<p>PEJVAK RVB ships as a single binary that is valid as both a VST3 and a CLAP plugin. Supported platforms are <strong>Windows</strong> (x86-64), <strong>macOS</strong> (Intel + Apple Silicon, universal binary), and <strong>Linux</strong> (x86-64).</p>
+
+<h3>Windows</h3>
+<p>Copy the plugin file to the appropriate system folder:</p>
+
+<h4>CLAP</h4>
+<div class="diagram">C:\Program Files\Common Files\CLAP\Pejvak_RVB.clap</div>
+
+<h4>VST3</h4>
+<div class="diagram">C:\Program Files\Common Files\VST3\PEJVAK RVB\Pejvak_RVB.vst3</div>
+
+<p>Then rescan plugins in your DAW. Depending on your host, you may need to restart it.</p>
+
+<h3>macOS</h3>
+<p>The macOS build is a <strong>universal binary</strong> — it runs natively on both Apple Silicon (M1/M2/M3/M4) and Intel Macs. No Rosetta required.</p>
+
+<h4>CLAP</h4>
+<div class="diagram">~/Library/Audio/Plug-Ins/CLAP/Pejvak_RVB.clap</div>
+
+<h4>VST3</h4>
+<div class="diagram">~/Library/Audio/Plug-Ins/VST3/PEJVAK RVB.vst3</div>
+
+<p>You can also install the VST3 system-wide for all users:</p>
+<div class="diagram">/Library/Audio/Plug-Ins/VST3/PEJVAK RVB.vst3</div>
+
+<div class="note">
+The first time you load the plugin, macOS may show a security warning
+because the binary is not notarized. To allow it:
+<strong>System Settings → Privacy &amp; Security → "Open Anyway"</strong>.
+This is only necessary once per installation.
+</div>
+
+<h3>Linux</h3>
+<p>Copy the plugin file to your user plugin folders:</p>
+
+<h4>CLAP</h4>
+<div class="diagram">~/.clap/Pejvak_RVB.clap</div>
+
+<h4>VST3</h4>
+<div class="diagram">~/.vst3/PEJVAK RVB.vst3</div>
+
+<p>For a system-wide install (requires root):</p>
+<div class="diagram">/usr/lib/clap/Pejvak_RVB.clap
+/usr/lib/vst3/PEJVAK RVB.vst3</div>
+
+<p>Then rescan plugins in your DAW (or restart it).</p>
+
+<div class="note">
+On Linux the plugin uses the system's default audio stack. Make sure your
+DAW's sandbox (if any) allows the plugin to run outside the sandbox, or
+install the plugin in the same path the DAW scans.
+</div>
+
+<h3>System requirements</h3>
+<table>
+  <tr><th>Platform</th><th>CPU</th><th>Notes</th></tr>
+  <tr><td>Windows 10 / 11</td><td>x86-64</td><td>SSE2 required (all CPUs since 2003 have it). AVX2 is used when available for the SIMD fast path but is not required.</td></tr>
+  <tr><td>macOS 10.15+</td><td>Intel or Apple Silicon</td><td>Universal binary ships both architectures. No Rosetta required on Apple Silicon.</td></tr>
+  <tr><td>Linux (glibc 2.31+)</td><td>x86-64</td><td>Same SSE2 / AVX2 requirements as Windows.</td></tr>
+</table>
+</section>
+
+<!-- ============ 2b. BUILDING ============ -->
+<section id="building">
+<h2>2b. Building from Source</h2>
+<p>PEJVAK RVB is written in Rust. The build requires Rust 1.98 or newer. All plugin binaries are produced from a single workspace — no external C++ toolchain, no VST3 SDK download needed.</p>
+
+<h3>Prerequisites</h3>
+
+<h4>Windows</h4>
+<div class="diagram">rustup target add x86_64-pc-windows-msvc</div>
+
+<h4>macOS</h4>
+<p>Install Xcode Command Line Tools, then add the two macOS targets:</p>
+<div class="diagram">xcode-select --install
+rustup target add aarch64-apple-darwin
+rustup target add x86_64-apple-darwin</div>
+
+<h4>Linux</h4>
+<p>Install the graphics and windowing dependencies, then add the target:</p>
+<div class="diagram">sudo apt-get install -y \
+  libx11-dev libxcursor-dev libxcb-dri2-0-dev \
+  libxcb-icccm4-dev libx11-xcb-dev mesa-common-dev \
+  libgl1-mesa-dev libglu1-mesa-dev
+
+rustup target add x86_64-unknown-linux-gnu</div>
+
+<h3>Build</h3>
+
+<h4>Windows / Linux</h4>
+<div class="diagram">cargo build -p Pejvak_RVB --release
+cargo nice-plug bundle Pejvak_RVB --release</div>
+
+<h4>macOS — universal binary</h4>
+<p>Build both architectures separately, then combine them with <code>lipo</code>:</p>
+<div class="diagram">cargo build -p Pejvak_RVB --release --target aarch64-apple-darwin
+cargo build -p Pejvak_RVB --release --target x86_64-apple-darwin
+
+mkdir -p target/universal/release
+lipo -create \
+  target/aarch64-apple-darwin/release/libPejvak_RVB.dylib \
+  target/x86_64-apple-darwin/release/libPejvak_RVB.dylib \
+  -output target/universal/release/libPejvak_RVB.dylib
+
+cargo nice-plug bundle Pejvak_RVB --release</div>
+
+<h3>Run the test suite</h3>
+<div class="diagram">cargo test -p fdn_reverb_core</div>
+
+<div class="tip">
+The DSP core (<code>fdn_reverb_core</code>) has no OS-specific code, so
+its tests run identically on all three platforms. If you are contributing
+DSP changes, they can be validated without a graphical environment.
+</div>
+</section>
+
+<!-- ============ 3. QUICK START ============ -->
+<section id="quickstart">
+<h2>3. Quick Start</h2>
+<ol>
+  <li>Insert PEJVAK RVB on a track in your DAW.</li>
+  <li>Click the <strong>preset name</strong> in the header to open the preset browser. Try <em>Small Wood Room</em> for a start.</li>
+  <li>Drag the <strong>Dry</strong> and <strong>Late</strong> faders in the MIXER card to balance the dry signal against the reverb tail.</li>
+  <li>Use the <strong>Size</strong> and <strong>Decay</strong> knobs in SPACE (FFDN) or LATE DELAY (CloudSeed) to shape the space.</li>
+  <li>If you want more character, enable a Texture layer from the <strong>TEXTURE</strong> tab and pull its Mix knob up.</li>
+</ol>
+
+<div class="tip">
+The fastest way to hear the difference between the two engines is to load the same preset category once on CLOUD and once on FFDN. The <em>Halls</em> category exists in both and gives a very direct comparison.
+</div>
+</section>
+
+<!-- ============ 4. INTERFACE ============ -->
+<section id="interface">
+<h2>4. Interface Overview</h2>
+<p>The interface is divided into a persistent header and two switchable pages: <strong>MAIN</strong> (the currently selected reverb engine) and <strong>TEXTURE</strong> (the Texture Rack and ILLUSION).</p>
+
+<div class="diagram">┌─────────────────────────────────────────────────────────────────────────────┐
+│  PEJVAK RVB   [MAIN|TEXTURE]  [TX]  [CLOUD|FFDN]  [Bypass|Freeze|Interp]   │
+│               [↶|↷]  [Preset▾]  [☰]  [☾]                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│                    (page content — MAIN or TEXTURE)                         │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘</div>
+
+<h3 id="header">4.1 Header</h3>
+
+<table>
+  <tr><th>Control</th><th>Function</th></tr>
+  <tr><td>MAIN | TEXTURE</td><td>Switch between the reverb engine page and the Texture Rack page.</td></tr>
+  <tr><td>TX</td><td>Kill switch — locks all seven Texture layers off in one click. See <a href="#tx">§9</a>.</td></tr>
+  <tr><td>CLOUD | FFDN</td><td>Selects the active reverb engine. Switching clears the departing engine's buffers so no stale tail bleeds through.</td></tr>
+  <tr><td>Bypass</td><td>Host-integrated bypass — the plugin passes audio through untouched.</td></tr>
+  <tr><td>Freeze</td><td>Holds the current reverb tail indefinitely. New input is rejected; existing sound keeps circulating.</td></tr>
+  <tr><td>Interp</td><td>Enables delay-line interpolation (smoother modulation at a small CPU cost). CloudSeed only.</td></tr>
+  <tr><td>↶ ↷</td><td>Undo / Redo. Hover shows which parameters the next action will affect. See <a href="#undo">§4.4</a>.</td></tr>
+  <tr><td>Preset ▾</td><td>Opens the preset browser. The ◀ ▶ arrows step through presets without opening the list.</td></tr>
+  <tr><td>☰</td><td>Plugin menu — Manual, Size, About, Show pop-ups. See <a href="#menu">§4.2</a>.</td></tr>
+  <tr><td>☾ / ☀</td><td>Toggles the plugin theme between dark and light.</td></tr>
+</table>
+
+<h3 id="menu">4.2 Menu ☰</h3>
+<p>Four items:</p>
+<ul>
+  <li><strong>Manual</strong> — opens this document in your browser.</li>
+  <li><strong>Size</strong> — a hover flyout listing UI-scale presets from 70 % to 200 %. The bottom of the list has <em>Set as default size</em>, which saves the current window size for future plugin instances.</li>
+  <li><strong>About</strong> — version information and build details.</li>
+  <li><strong>Show pop-ups</strong> — toggles all hover tooltips on and off. Useful for screen recordings where tooltip flicker is distracting. The setting is remembered across sessions.</li>
+</ul>
+
+<h3 id="presets">4.3 Preset Browser</h3>
+<p>Click the preset name in the header to open the browser. It groups 96 factory presets into 16 colour-coded categories and provides:</p>
+<ul>
+  <li><strong>Search box</strong> — filters the visible list as you type.</li>
+  <li><strong>Init</strong> — loads the factory default state.</li>
+  <li><strong>Save Preset…</strong> — writes the current state to a user XML file in <code>%APPDATA%\PEJVAK RVB\Presets\</code>.</li>
+  <li><strong>Load Preset…</strong> — reads a user XML preset from disk.</li>
+  <li><strong>User Presets</strong> — a section listing every <code>.xml</code> file you have saved.</li>
+</ul>
+
+<div class="note">
+Loading a preset from an older version is safe: the XML format is append-only, and any parameter that the file did not carry keeps its current value.
+</div>
+
+<h3 id="undo">4.4 Undo / Redo</h3>
+<p>The history covers every user-visible parameter, plus the active engine, the current page, and the preset name. Up to 50 steps are retained.</p>
+<ul>
+  <li><strong>One drag = one undo step.</strong> Dragging a knob from 0 to 100 creates a single history entry, not a hundred.</li>
+  <li><strong>Engine and page switches do not create entries on their own.</strong> But if you change a parameter on FFDN and press Undo, you are returned to FFDN automatically.</li>
+  <li><strong>Tooltips tell you what will change.</strong> Hover over ↶ or ↷ to see a summary such as <em>Undo: Size, Decay</em>.</li>
+</ul>
+</section>
+
+<!-- ============ 5. CLOUDSEED ============ -->
+<section id="cloudseed">
+<h2>5. CloudSeed Engine</h2>
+<p>The CloudSeed page shows nine cards in a three-column grid. Every card has a title and, when relevant, an enable switch on the right.</p>
+
+<div class="diagram">┌──────────────────┬──────────────────┬──────────────────┐
+│ MULTITAP DELAY   │ INPUT (4 knobs)  │ EARLY DIFFUSION  │
+├──────────────────┼──────────────────┼──────────────────┤
+│ LATE DELAY       │ EQ + Master ★    │ LATE DIFFUSION   │
+├──────────────────┼──────────────────┼──────────────────┤
+│ ROUTE            │ MIXER (5 faders) │ VELVET NOISE     │
+└──────────────────┴──────────────────┴──────────────────┘</div>
+
+<h3 id="cs-input">5.1 INPUT</h3>
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Blend</td><td>0 – 1</td><td>Stereo cross-blend applied before the reverb. 0 = fully independent L/R; 1 = full channel swap.</td></tr>
+  <tr><td>Pre-Dly</td><td>0 – 1000 ms</td><td>Delay before the reverb starts. Even a few milliseconds sharpens the front edge of the wet signal.</td></tr>
+  <tr><td>Low Cut</td><td>20 – 1000 Hz</td><td>High-pass on the input. Removes rumble so the tail stays clear.</td></tr>
+  <tr><td>High Cut</td><td>400 – 20 000 Hz</td><td>Low-pass on the input. Tames bright or fizzy source material.</td></tr>
+  <tr><td>HP / LP</td><td>on/off</td><td>Individual switches for the two filters. Both off by default.</td></tr>
+</table>
+
+<h3 id="cs-multitap">5.2 MULTITAP DELAY</h3>
+<p>An early-reflection diffuser made of up to 50 taps spread across a delay line.</p>
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Length</td><td>0 – 500 ms</td><td>Total span of the tap pattern.</td></tr>
+  <tr><td>Gain</td><td>0 – 1</td><td>Wet level of the tap sum.</td></tr>
+  <tr><td>Decay</td><td>0 – 1</td><td>Amplitude falloff across the taps. Higher = taps further away from the first are quieter.</td></tr>
+  <tr><td>Count</td><td>1 – 50</td><td>Number of taps. Below 8 the taps become individually audible; above 30 the pattern is smooth.</td></tr>
+  <tr><td>Seed</td><td>0 – 1 000 000</td><td>Deterministic PRNG seed for the tap positions. Change to get a different character.</td></tr>
+</table>
+
+<h3 id="cs-early">5.3 EARLY DIFFUSION</h3>
+<p>A cascade of up to eight allpass filters between the multitap and the FDN delay lines.</p>
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Delay</td><td>10 – 100 ms</td><td>Base allpass delay.</td></tr>
+  <tr><td>Feedback</td><td>0 – 0.92</td><td>Allpass coefficient. Values above 0.9 build long diffusion tails.</td></tr>
+  <tr><td>Mod Amt / Rate</td><td>0 – 2.5 ms / 0 – 5 Hz</td><td>LFO applied to the allpass delays to add movement.</td></tr>
+  <tr><td>Stages</td><td>1 – 8</td><td>Number of cascaded allpass stages.</td></tr>
+  <tr><td>Seed</td><td>0 – 1 000 000</td><td>Seed for the per-stage delay lengths.</td></tr>
+</table>
+
+<h3 id="cs-late">5.4 LATE DELAY</h3>
+<p>The main FDN network of the CloudSeed engine. Twelve delay lines run in parallel with per-line feedback.</p>
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Delay</td><td>20 – 1000 ms</td><td>Base delay time. Shorter = small rooms; longer = halls.</td></tr>
+  <tr><td>Decay</td><td>0.05 – 60 s</td><td>RT60 of the tail.</td></tr>
+  <tr><td>Mod Amt / Rate</td><td>0 – 2.5 ms / 0 – 5 Hz</td><td>LFO modulation applied to every line.</td></tr>
+  <tr><td>Lines</td><td>1 – 12</td><td>Number of active delay lines.</td></tr>
+  <tr><td>Seed</td><td>0 – 1 000 000</td><td>Seed for the per-line delays.</td></tr>
+</table>
+
+<h3 id="cs-latediff">5.5 LATE DIFFUSION</h3>
+<p>An allpass diffuser inside every delay line's feedback loop. This is what gives CloudSeed its characteristic dense, breathing tail. Controls are identical to EARLY DIFFUSION.</p>
+
+<h3 id="cs-eq">5.6 EQ</h3>
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Low Frq</td><td>20 – 1000 Hz</td><td>Low-shelf crossover.</td></tr>
+  <tr><td>Low Gain</td><td>−inf – 0 dB</td><td>Low-shelf cut.</td></tr>
+  <tr><td>Hi Gain</td><td>−inf – 0 dB</td><td>High-shelf cut.</td></tr>
+  <tr><td>Hi Frq</td><td>400 – 20 000 Hz</td><td>High-shelf crossover.</td></tr>
+  <tr><td>Cutoff</td><td>400 – 20 000 Hz</td><td>Post-reverb low-pass.</td></tr>
+  <tr><td>Low / High / Cutoff switches</td><td>on/off</td><td>Individual enables for the three filters.</td></tr>
+</table>
+<p>The card title also has a master <strong>EQ switch</strong>. Turning it off forces all three sub-filters off at the DSP level without changing their stored values, so the switch is a fast A/B control.</p>
+
+<h3 id="cs-route">5.7 ROUTE</h3>
+<p>Determines whether the EQ is applied <em>before</em> or <em>after</em> the delay lines.</p>
+<ul>
+  <li><strong>PRE</strong> — EQ shapes what enters the network. Sounds natural and is the default.</li>
+  <li><strong>POST</strong> — EQ shapes the wet output. Useful for surgical tonal shaping after the tail has already formed.</li>
+</ul>
+
+<h3 id="cs-mixer">5.8 MIXER</h3>
+<table>
+  <tr><th>Fader</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Dry</td><td>−inf – 0 dB</td><td>Unprocessed input level.</td></tr>
+  <tr><td>PreDly</td><td>−inf – 0 dB</td><td>Output of the pre-delay stage only (no diffusion).</td></tr>
+  <tr><td>Early</td><td>−inf – 0 dB</td><td>Output of the early-reflection network.</td></tr>
+  <tr><td>Late</td><td>−inf – 0 dB</td><td>Output of the late FDN network.</td></tr>
+  <tr><td>Width</td><td>0 – 200 %</td><td>Mid/side width of the entire wet output.</td></tr>
+</table>
+
+<h3 id="cs-engine">5.9 VELVET NOISE</h3>
+<p>Three knobs that control the Velvet-Noise VFDN — a sparse diffusion stage placed inside the CloudSeed channel, outside every feedback loop.</p>
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Velvet</td><td>0 – 100 %</td><td>Diffusion amount. At 0 the stage is bypassed and the engine is bit-identical to plain CloudSeed.</td></tr>
+  <tr><td>Density</td><td>0 – 100 %</td><td>Pulse density. 0 % = 1500 pulses/s (grainier); 100 % = 3000 pulses/s (smoother).</td></tr>
+  <tr><td>Tone</td><td>0 – 100 %</td><td>Pulse width (Dark Velvet Noise). 0 % = impulse pulses; 100 % = wide rectangular pulses.</td></tr>
+</table>
+</section>
+
+<!-- ============ 6. FFDN ============ -->
+<section id="ffdn">
+<h2>6. FFDN Engine</h2>
+<p>The FFDN page also shows nine cards, but the layout is different from CloudSeed. Seven of them have a master enable switch in the title row.</p>
+
+<div class="diagram">┌──────────────────┬──────────────────┬──────────────────┐
+│ SPACE ★          │ INPUT (3 knobs)  │ SHELVES ★        │
+├──────────────────┼──────────────────┼──────────────────┤
+│ NETWORK ★        │ CHARACTER ★      │ MODULATION ★     │
+│ [HOUSE|VELVET]   │ Cross, Sat,      │ Damping,         │
+│                  │ TiltFrq, TiltAmt │ ModAmt, ModRate  │
+│                  │ [Sat][Tilt]      │                  │
+├──────────────────┼──────────────────┼──────────────────┤
+│ FILTER ★         │ MIXER (4 faders) │ DYNAMICS ★       │
+│                  │ Dry, Early,      │ Attack, Ducking, │
+│                  │ Late, Width      │ Gate             │
+└──────────────────┴──────────────────┴──────────────────┘</div>
+
+<h3 id="ffdn-space">6.1 SPACE ★</h3>
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Size</td><td>5 – 200 ms</td><td>Base delay length. Sets the perceived room size.</td></tr>
+  <tr><td>Decay</td><td>0.1 – 60 s</td><td>Target RT60 of the network.</td></tr>
+  <tr><td>Spread</td><td>0 – 100 %</td><td>How far individual lines deviate from the base Size. 0 % = all equal; 100 % = ±50 %.</td></tr>
+  <tr><td>Diffusion</td><td>0 – 100 %</td><td>Allpass cascade placed before the FDN. 0 % = bypass (bit-identical to plain FFDN).</td></tr>
+</table>
+
+<h3 id="ffdn-network">6.2 NETWORK ★</h3>
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Lines</td><td>4 – 16</td><td>Number of active delay lines per network. 8 is the neutral default.</td></tr>
+  <tr><td>Density</td><td>0 – 100 %</td><td>How the input is distributed across lines. 50 % = uniform (neutral).</td></tr>
+  <tr><td>Decorr</td><td>0 – 100 %</td><td>Delay offset between the L and R networks. 50 % = 3 % offset (neutral). 100 % = 6 % offset, wider stereo.</td></tr>
+  <tr><td>Matrix Type</td><td>HOUSEHOLDER / VELVET</td><td>Householder = dense, smooth tail. Velvet = sparse blocked mixing, more natural echo pattern.</td></tr>
+</table>
+
+<h3 id="ffdn-character">6.3 CHARACTER ★</h3>
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Cross</td><td>0 – 100 %</td><td>Cross-feed between L and R networks. 0 % = independent; 50 % = mono; 100 % = swapped.</td></tr>
+  <tr><td>Sat</td><td>0 – 100 %</td><td>Velvet saturation inside the feedback loop. A smooth, tubey sine-shaper with pre-gain and makeup. <em>Requires the Sat switch below.</em></td></tr>
+  <tr><td>Tilt Frq</td><td>100 – 10 000 Hz</td><td>Crossover of the spectral tilt filter.</td></tr>
+  <tr><td>Tilt Amt</td><td>0 – 100 %</td><td>Spectral tilt. 0 % = bass-heavy, 50 % = flat, 100 % = treble-heavy. <em>Requires the Tilt switch below.</em></td></tr>
+  <tr><td>Sat / Tilt switches</td><td>on/off</td><td>Individual enables for the two processing stages.</td></tr>
+</table>
+<div class="note">
+Early reflections are always on when the CHARACTER card is on. Their level is controlled by the <strong>Early</strong> fader in the MIXER card.
+</div>
+
+<h3 id="ffdn-shelves">6.4 SHELVES ★</h3>
+<p>Frequency-dependent attenuation. Each band can decay at a different rate.</p>
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Bass</td><td>0.25× – 4.00×</td><td>Bass RT60 multiplier. 1.0× = same as mid.</td></tr>
+  <tr><td>Bass Hz</td><td>50 – 1000 Hz</td><td>Low-shelf crossover.</td></tr>
+  <tr><td>Treb</td><td>0.25× – 4.00×</td><td>Treble RT60 multiplier. Below 1.0× = faster treble decay.</td></tr>
+  <tr><td>Treb Hz</td><td>1 – 15 kHz</td><td>High-shelf crossover.</td></tr>
+</table>
+
+<h3 id="ffdn-modulation">6.5 MODULATION ★</h3>
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Damping</td><td>500 – 20 000 Hz</td><td>One-pole low-pass inside every delay line. This is the primary HF shaper — use it before reaching for Loop LP.</td></tr>
+  <tr><td>Mod Amt</td><td>0 – 3 ms</td><td>LFO depth on each line. 0 = static tail.</td></tr>
+  <tr><td>Mod Rate</td><td>0.1 – 5 Hz</td><td>LFO speed.</td></tr>
+</table>
+
+<h3 id="ffdn-filter">6.6 FILTER ★</h3>
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Loop HP</td><td>20 – 500 Hz</td><td>High-pass inside the feedback loop. At 20 Hz it is bypassed (neutral).</td></tr>
+  <tr><td>Loop LP</td><td>2 – 20 kHz</td><td>Sharper (12 dB/oct) low-pass inside the loop, stacked on top of Damping. At 20 kHz it is bypassed.</td></tr>
+  <tr><td>Mid Focus</td><td>0 – 100 %</td><td>Cuts both ends at once — up to −6 dB below 400 Hz and −6 dB above 1500 Hz — focusing the tail on the mid band. Never boosts, so the loop stays unconditionally stable.</td></tr>
+</table>
+
+<h3 id="ffdn-dynamics">6.7 DYNAMICS ★</h3>
+<p>Three post-network gain stages. All live <em>after</em> the FDN, so they cannot destabilise the feedback loop.</p>
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Attack</td><td>0 – 100 %</td><td>Softens the initial transient of the wet signal. 0 % = instant; up to 500 ms swell at 100 %.</td></tr>
+  <tr><td>Ducking</td><td>0 – 100 %</td><td>Reduces the wet while dry input is present, recovers in silence. Classic vocal reverb behaviour.</td></tr>
+  <tr><td>Gate</td><td>0 – 100 %</td><td>Progressively silences the wet once its envelope drops below a threshold. Soft, click-free close.</td></tr>
+</table>
+<div class="note">
+The FFDN <strong>INPUT</strong> card shows three knobs (Pre-Dly, Low Cut, High Cut). The <em>Blend</em> knob is not present because the FFDN already has the <strong>Cross</strong> control in CHARACTER, which covers the same range more cleanly.
+</div>
+</section>
+
+<!-- ============ 7. TEXTURE ============ -->
+<section id="texture">
+<h2>7. Texture Rack</h2>
+<p>Six post-reverb layers that run in series on the wet signal. The rack is available on <em>both</em> engines — CloudSeed and FFDN — so you can stack the same textures on either reverb character. Each layer has its own <em>Mix</em> knob and its own enable switch in the card title. At Mix = 0 a layer is bypassed entirely — the rack is bit-identical to a plain reverb.</p>
+<p>Every layer implements the same anti-click scheme: a 20 ms one-pole smoother on the Mix parameter, and a runtime-state reset on the rising edge from exactly zero. This means toggling a layer's enable switch or dragging its Mix knob from zero produces no click.</p>
+
+<h3 id="chain">7.1 SIGNAL CHAIN</h3>
+<p>The bottom of the TEXTURE page shows the six layers as a row of chips. Their left-to-right order is the actual processing order.</p>
+<ul>
+  <li><strong>Drag a chip</strong> — as soon as the pointer crosses the midpoint between two slots, they swap. The chips slide smoothly between positions.</li>
+  <li><strong>Click an arrow</strong> — swaps the two adjacent layers.</li>
+  <li><strong>Grey chips</strong> represent layers that are currently disabled. They still participate in the chain order but do not process audio.</li>
+</ul>
+<div class="tip">
+Placing SHIMMER last produces a smooth, top-down wash. Placing it first adds the pitched content before the rest of the textures diffuse it — useful for a more aggressive shimmer.
+</div>
+
+<h3 id="shimmer">7.2 SHIMMER</h3>
+<p>A classic Eno/Lanois shimmer: a granular pitch-shifter inside a feedback loop, with high-cut and low-cut shaping the tone.</p>
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Pitch</td><td>−12 – +12 st</td><td>0.5 = unison; below = down-shift; above = up-shift.</td></tr>
+  <tr><td>Feedback</td><td>0 – 95 %</td><td>How much of the shifted signal is fed back. Above 85 % the tail becomes quite long.</td></tr>
+  <tr><td>LowCut</td><td>20 – 2000 Hz</td><td>High-pass before the shifter.</td></tr>
+  <tr><td>HighCut</td><td>200 – 15 200 Hz</td><td>Low-pass after the shifter.</td></tr>
+  <tr><td>Mix</td><td>0 – 100 %</td><td>Amount of shimmer in the output.</td></tr>
+</table>
+
+<h3 id="mist">7.3 MIST</h3>
+<p>A soft, hazy thickening: short modulated delay with light feedback, band-limited by an HPF and an LPF.</p>
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>HP</td><td>100 – 3000 Hz</td><td>High-pass before the delay.</td></tr>
+  <tr><td>Feedback</td><td>0 – 90 %</td><td>Diffusion feedback.</td></tr>
+  <tr><td>Delay</td><td>8 – 40 ms</td><td>Base delay. Shorter = thicker; longer = more discrete.</td></tr>
+  <tr><td>Rate</td><td>0.05 – 25 Hz</td><td>LFO speed.</td></tr>
+  <tr><td>Mix</td><td>0 – 100 %</td><td>Amount of mist.</td></tr>
+</table>
+
+<h3 id="drift">7.4 DRIFT</h3>
+<p>A very slow pitch wobble — a tiny (< 0.4 ms) modulation on a short delay line. Makes the reverb feel alive without being audible as vibrato.</p>
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Feedback</td><td>0 – 85 %</td><td>Delay feedback.</td></tr>
+  <tr><td>Delay</td><td>5 – 25 ms</td><td>Base delay.</td></tr>
+  <tr><td>Rate</td><td>0.02 – 0.52 Hz</td><td>LFO speed. Above 0.5 Hz it starts to sound like chorus.</td></tr>
+  <tr><td>Depth</td><td>0 – 100 %</td><td>Modulation depth.</td></tr>
+  <tr><td>Mix</td><td>0 – 100 %</td><td>Amount of drift.</td></tr>
+</table>
+
+<h3 id="crystal">7.5 CRYSTAL</h3>
+<p>Two independent grain readers jumping around a shared circular buffer. Produces a glassy, stuttering texture.</p>
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Size</td><td>15 – 150 ms</td><td>Grain length.</td></tr>
+  <tr><td>Density</td><td>20 – 250 ms</td><td>Time between grain triggers (lower value = more grains/sec).</td></tr>
+  <tr><td>Feedback</td><td>0 – 90 %</td><td>Grain cloud feedback.</td></tr>
+  <tr><td>Mix</td><td>0 – 100 %</td><td>Amount of crystal texture.</td></tr>
+</table>
+
+<h3 id="scatter">7.6 SCATTER</h3>
+<p>Overlapping grains with random start positions. Denser and more chaotic than Crystal.</p>
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Spread</td><td>0 – 100 %</td><td>How far grains can start from the write head.</td></tr>
+  <tr><td>Density</td><td>0 – 100 %</td><td>Grain spawn rate.</td></tr>
+  <tr><td>Speed</td><td>0 – 100 %</td><td>Rate scaling on top of Density.</td></tr>
+  <tr><td>Feedback</td><td>0 – 70 %</td><td>Scatter feedback.</td></tr>
+  <tr><td>Mix</td><td>0 – 100 %</td><td>Amount of scattered echoes.</td></tr>
+</table>
+
+<h3 id="bloom">7.7 BLOOM</h3>
+<p>A slow-rising reverb inspired by the Midiverb II Bloom algorithm. The wet signal swells in over up to 2 seconds, producing a reverse-reverb character.</p>
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Rise</td><td>50 – 2000 ms</td><td>Envelope attack time. Lower = faster swell.</td></tr>
+  <tr><td>Size</td><td>60 – 250 ms</td><td>Diffusion space size.</td></tr>
+  <tr><td>Feedback</td><td>0 – 85 %</td><td>Bloom feedback.</td></tr>
+  <tr><td>Tone</td><td>2 – 12 kHz</td><td>Brightness of the bloom.</td></tr>
+  <tr><td>Mix</td><td>0 – 100 %</td><td>Amount of blooming texture.</td></tr>
+</table>
+</section>
+
+<!-- ============ 8. ILLUSION ============ -->
+<section id="illusion">
+<h2>8. ILLUSION — Granular Cloud</h2>
+<p>A granular cloud with pitched overtones and a musical envelope follower. ILLUSION is <em>not</em> a Texture layer — it runs after the Texture Rack, on the full wet signal. It can be enabled or disabled from its own card at the bottom of the TEXTURE page.</p>
+
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Spark</td><td>0 – 100 %</td><td>Granular cloud amount. 0 % = bypass.</td></tr>
+  <tr><td>Still</td><td>0 – 100 %</td><td>Motion smoothness. 0 % = scattered; 100 % = calm, meditative.</td></tr>
+  <tr><td>Aura</td><td>−24 – +24 st</td><td>Pitch shift. At 0 st the internal sequence plays. Any non-zero value overrides the sequence with a fixed transposition.</td></tr>
+  <tr><td>Veil</td><td>0 – 85 %</td><td>Feedback into the capture buffer. Higher = repeating patterns, hazy wash.</td></tr>
+  <tr><td>Wide</td><td>0 – 200 %</td><td>Stereo width of the wet signal.</td></tr>
+  <tr><td>Tint</td><td>800 – 18 000 Hz</td><td>Tone of the wet signal.</td></tr>
+  <tr><td>Rate</td><td>0.5 – 8 Hz</td><td>Clock speed. 0.5 Hz = very slow; 8 Hz = fast arpeggio.</td></tr>
+  <tr><td>Grain</td><td>30 – 300 ms</td><td>Length of each grain. Longer = smoother and more legato.</td></tr>
+</table>
+
+<h3>Anti-click design</h3>
+<p>Granular engines click easily. ILLUSION uses eight independent techniques to avoid it: grain length capping by pitch ratio, safety margins on grain start positions, smoothstep fade-in and fade-out on every grain, Catmull-Rom cubic interpolation, a DC blocker on the grain sum, soft-clip on the feedback path, output smoothing at 10 kHz, and denormal flushing. The result is a cloud that stays click-free even when you sweep the knobs quickly.</p>
+</section>
+
+<!-- ============ 9. TX ============ -->
+<section id="tx">
+<h2>9. TX Kill Switch</h2>
+<p>The <strong>TX</strong> button in the header is a master switch for all seven Texture Rack layers plus ILLUSION.</p>
+<ul>
+  <li><strong>Click once</strong> — remembers the enable-state of every layer, then turns them all off. The button pulses red to signal that the lock is active.</li>
+  <li><strong>Click again</strong> — restores the exact enable-state that was captured.</li>
+  <li>While the lock is active, the individual per-card enable switches are disabled. They show a soft red tone and their tooltip explains how to release the lock.</li>
+  <li>Undo and redo both cooperate with the TX lock: undoing past the moment it was engaged automatically unlocks it.</li>
+</ul>
+</section>
+
+<!-- ============ 10. PRESET LIBRARY ============ -->
+<section id="presets-library">
+<h2>10. Preset Library</h2>
+<p>96 factory presets across 16 categories:</p>
+<table>
+  <tr><th>Category</th><th>Engine</th><th>Count</th></tr>
+  <tr><td>Ambience</td><td>CloudSeed</td><td>6 + Init</td></tr>
+  <tr><td>Rooms</td><td>CloudSeed</td><td>8</td></tr>
+  <tr><td>Chambers</td><td>CloudSeed</td><td>7</td></tr>
+  <tr><td>Plates</td><td>CloudSeed</td><td>7</td></tr>
+  <tr><td>Halls</td><td>CloudSeed</td><td>8</td></tr>
+  <tr><td>Cathedral</td><td>CloudSeed</td><td>6</td></tr>
+  <tr><td>Textures</td><td>CloudSeed or FFDN + Texture Rack</td><td>8</td></tr>
+  <tr><td>Extreme</td><td>CloudSeed</td><td>6</td></tr>
+  <tr><td>FFDN Spaces</td><td>FFDN</td><td>6</td></tr>
+  <tr><td>FFDN Halls</td><td>FFDN</td><td>6</td></tr>
+  <tr><td>FFDN Plates</td><td>FFDN</td><td>5</td></tr>
+  <tr><td>FFDN Ambient</td><td>FFDN + Texture Rack</td><td>6</td></tr>
+  <tr><td>FFDN Character</td><td>FFDN</td><td>5</td></tr>
+  <tr><td>FFDN Dynamic</td><td>FFDN</td><td>4</td></tr>
+  <tr><td>Illusion</td><td>Any engine + ILLUSION</td><td>6</td></tr>
+  <tr><td>Shimmer</td><td>Any engine + Texture Rack</td><td>5</td></tr>
+</table>
+</section>
+
+<!-- ============ 11. AUTOMATION ============ -->
+<section id="automation">
+<h2>11. Automation</h2>
+<p>Every parameter — including the Texture Rack, ILLUSION, and the FFDN engine — is exposed to the host for automation. Parameter IDs follow the CloudSeed XML naming scheme so presets port cleanly between the plugin and the original CloudSeed.</p>
+
+<h3>Parameter names</h3>
+<p>Every parameter is exposed under a stable DAW-visible name. Two entries use descriptive names that reflect what the control actually does:</p>
+<table>
+  <tr><th>Parameter ID</th><th>Display name</th><th>Controls</th></tr>
+  <tr><td>FfdnDrive</td><td>Saturation</td><td>Amount of Velvet saturation applied inside the FFDN feedback loop.</td></tr>
+  <tr><td>FfdnDriveEnabled</td><td>SaturationEnabled</td><td>Enable switch for the saturation stage.</td></tr>
+</table>
+</section>
+
+<!-- ============ 12. TROUBLESHOOTING ============ -->
+<section id="trouble">
+<h2>12. Troubleshooting</h2>
+
+<h3>No sound / plugin not passing audio</h3>
+<ul>
+  <li>Check that the <strong>Bypass</strong> switch in the header is off.</li>
+  <li>Check that the <strong>Dry</strong> fader in MIXER is not at −inf.</li>
+  <li>Check that the input is not being rejected by an aggressive Low Cut or High Cut.</li>
+</ul>
+
+<h3>Reverb tail is too short</h3>
+<ul>
+  <li>Increase <strong>Decay</strong> (FFDN) or <strong>Decay</strong> in LATE DELAY (CloudSeed).</li>
+  <li>Check the SHELVES card: a Bass multiplier well below 1.0× and a Treble multiplier well below 1.0× will shorten the tail at both ends.</li>
+  <li>On CloudSeed, make sure <strong>Late Delay</strong> is enabled.</li>
+</ul>
+
+<h3>Clicks when toggling a Texture layer</h3>
+<p>This should not happen — all six layers implement anti-click. If you hear one:</p>
+<ul>
+  <li>Check that the Mix knob is not being automated to jump between 0 and a high value instantaneously. Use a short ramp in the host.</li>
+  <li>Make sure no other plugin in the signal chain is producing the click.</li>
+</ul>
+
+<h3>Plugin crashes or hangs in the DAW</h3>
+<ul>
+  <li>The DSP runs inside a catch-unwind guard, so a panic cannot crash the host — but it can silence the output for one block. If you see intermittent silences, please report a bug with your host and OS version.</li>
+  <li>Make sure your host's plugin sandbox is enabled. If the plugin misbehaves, a sandboxed instance can be killed without taking the host down.</li>
+</ul>
+
+<h3>macOS: "Plugin cannot be opened because the developer cannot be verified"</h3>
+<p>This is standard Gatekeeper behaviour for unsigned binaries. To allow the plugin the first time:</p>
+<ul>
+  <li>Open <strong>System Settings</strong> → <strong>Privacy &amp; Security</strong>.</li>
+  <li>Scroll down to the security section. You should see a message about <code>PEJVAK RVB</code> being blocked.</li>
+  <li>Click <strong>Open Anyway</strong> and confirm.</li>
+  <li>Restart your DAW. The plugin will load normally from then on.</li>
+</ul>
+
+<h3>macOS: plugin does not appear in the DAW after installation</h3>
+<ul>
+  <li>Confirm you copied the plugin to the correct folder for your DAW
+      (<code>~/Library/Audio/Plug-Ins/VST3/</code> for user-level or
+      <code>/Library/Audio/Plug-Ins/VST3/</code> for system-level).</li>
+  <li>Some DAWs (Ableton, Reaper, Bitwig) require you to add the folder to
+      their plugin search path manually.</li>
+  <li>Rescan plugins from the DAW's preferences. On Logic Pro, use
+      <strong>Logic Pro → Settings → Plug-in Manager</strong> and click
+      <strong>Reset &amp; Rescan Selection</strong>.</li>
+</ul>
+
+<h3>Linux: plugin fails to load with "libGL" or "libX11" errors</h3>
+<p>Some minimal Linux distributions do not ship the windowing libraries by default. Install them:</p>
+<div class="diagram">sudo apt-get install -y libx11-6 libxcursor1 libgl1 libglu1-mesa</div>
+<p>On Fedora / RHEL-based distributions, use <code>dnf</code> with the equivalent package names.</p>
+
+<h3>Linux: Wayland vs. X11</h3>
+<p>The plugin runs under both Wayland and X11. If your DAW uses Wayland and
+you see rendering glitches, try launching the DAW with XWayland:</p>
+<div class="diagram">GDK_BACKEND=x11 your-daw</div>
+
+<h3>Text is too small / too large</h3>
+<p>Open the ☰ menu, pick <strong>Size</strong>, and choose a preset from 70 % to 200 %. You can also drag the bottom-right corner of the plugin window to resize it freely; the aspect ratio is locked so the layout never breaks.</p>
+
+<h3>Tooltips get in the way</h3>
+<p>Open the ☰ menu and toggle <strong>Show pop-ups</strong> off. All hover tooltips will be suppressed until you toggle it back on.</p>
+</section>
+
+<!-- ============ 13. CREDITS ============ -->
+<section id="credits">
+<h2>13. Credits & License</h2>
+
+<h3>Author & Publisher</h3>
+<p>
+  <strong>Pejvak DSP</strong> — an independent audio plugin studio focused on bit-exact DSP and modern interfaces.
+  <br>
+  Designed &amp; developed by <strong>Amin Yousefinejad</strong>.
+  <br>
+  <a href="https://github.com/Pejvak-DSP" target="_blank" rel="noopener">github.com/Pejvak-DSP</a>
+</p>
+
+<h3>Based on</h3>
+<ul>
+  <li>
+    <strong>CloudSeed</strong> by Valdemar Erlingsson — the original C++ reference.
+    The CloudSeed engine is a faithful <code>f64</code> port of the
+    <code>legacy-v1</code> branch and is bit-identical at the sample level.
+    <br>
+    <a href="https://github.com/ValdemarOrn/CloudSeed/tree/legacy-v1" target="_blank" rel="noopener">
+      github.com/ValdemarOrn/CloudSeed/tree/legacy-v1
+    </a>
+  </li>
+  <li>
+    <strong>CloudReverb</strong> by xunil-cloud — a JUCE-based fork of
+    CloudSeed that served as a second reference during the port, in
+    particular for cross-platform behaviour and the modern parameter
+    layout.
+    <br>
+    <a href="https://github.com/xunil-cloud/CloudReverb" target="_blank" rel="noopener">
+      github.com/xunil-cloud/CloudReverb
+    </a>
+  </li>
+  <li>FFDN theory: Fagerström et al., "Velvet-Noise Feedback Delay Network" (DAFx 2020); Schlecht &amp; Habets, "Feedback Delay Networks" (IEEE TSP 2017).</li>
+  <li>Velvet-noise diffusion: Välimäki et al. (IEEE/ACM TASLP 2017).</li>
+  <li>Sine-shaper saturation: Zölzer, <em>DAFX</em>.</li>
+  <li>Granular design: Curtis Roads, <em>Microsound</em> (MIT Press, 2001).</li>
+</ul>
+
+<h3>Built with</h3>
+<ul>
+  <li>Rust 1.98+</li>
+  <li>nice-plug 0.4.2 — plugin framework</li>
+  <li>egui 0.36 — user interface</li>
+  <li>wide 1.7 — portable SIMD</li>
+</ul>
+
+<h3>License</h3>
+<p>PEJVAK RVB is released under the <strong>GNU General Public License v3.0 or later</strong>. The full text of the license is available at <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener">gnu.org/licenses/gpl-3.0.html</a>.</p>
+
+<p style="text-align:center; margin-top:48px; color: var(--fg-3); font-size: 13px;">
+  Pejvak DSP · Made with ♥ Amin Yousefinejad
+</p>
+</section>
+
+<button id="backToTop" title="Back to top" aria-label="Back to top">↑</button>
+
+</main>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---- Theme toggle ----
+  const themeBtn = document.getElementById('themeBtn');
+  const stored = localStorage.getItem('pejvak-theme');
+  if (stored === 'light') document.documentElement.classList.add('light');
+  updateThemeBtn();
+  themeBtn.addEventListener('click', () => {
+    document.documentElement.classList.toggle('light');
+    localStorage.setItem(
+      'pejvak-theme',
+      document.documentElement.classList.contains('light') ? 'light' : 'dark'
+    );
+    updateThemeBtn();
+  });
+  function updateThemeBtn() {
+    const light = document.documentElement.classList.contains('light');
+    themeBtn.textContent = light ? '☾ Theme' : '☀ Theme';
+  }
+
+  // ---- TOC active-section highlight ----
+  const sections = Array.from(document.querySelectorAll('section[id]'));
+  const tocLinks = Array.from(document.querySelectorAll('#toc a'));
+  const observer = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((e) => {
+        if (e.isIntersecting) {
+          tocLinks.forEach((a) =>
+            a.classList.toggle('active', a.getAttribute('href') === '#' + e.target.id)
+          );
+        }
+      });
+    },
+    { rootMargin: '-10% 0px -80% 0px' }
+  );
+  sections.forEach((s) => observer.observe(s));
+
+  // ---- Professional search ----------------------------------------
+  //
+  // Features:
+  //   * Live search as you type (120 ms debounce).
+  //   * Match counter inside the input (n / total).
+  //   * Enter / Shift+Enter to jump between matches.
+  //   * Previous / next buttons in the toolbar.
+  //   * Current match is visually stronger than the rest.
+  //   * Ctrl+F focuses the box; Escape clears it.
+  const search = document.getElementById('search');
+  const searchInfo = document.getElementById('searchInfo');
+  const searchCount = document.getElementById('searchCount');
+  const searchPrev = document.getElementById('searchPrev');
+  const searchNext = document.getElementById('searchNext');
+  const main = document.querySelector('main');
+
+  // ---- Keep --header-h in sync with the real header height --------
+  // The header is `position: sticky` and its height varies with the
+  // viewport (the toolbar can wrap to two rows on narrow screens).
+  // The CSS `scroll-padding-top` on <html> and `scroll-margin-top`
+  // on every <section> consume this variable so that clicking a TOC
+  // link never hides the section title under the header. We measure
+  // it at load and whenever the viewport is resized.
+  function updateHeaderHeight() {
+    const header = document.querySelector('header.top');
+    if (!header) return;
+    const h = header.getBoundingClientRect().height;
+    document.documentElement.style.setProperty('--header-h', h + 'px');
+  }
+  updateHeaderHeight();
+  window.addEventListener('resize', updateHeaderHeight);
+  window.addEventListener('load', updateHeaderHeight);
+
+  let marks = [];
+  let currentMarkIndex = -1;
+
+  function clearMarks() {
+    marks.forEach((m) => {
+      const parent = m.parentNode;
+      if (!parent) return;
+      parent.replaceChild(document.createTextNode(m.textContent), m);
+      parent.normalize();
+    });
+    marks = [];
+    currentMarkIndex = -1;
+  }
+
+  function setNavEnabled(on) {
+    searchPrev.disabled = !on;
+    searchNext.disabled = !on;
+  }
+
+  function updateCountLabel() {
+    if (marks.length === 0) {
+      searchCount.textContent = '';
+      return;
+    }
+    searchCount.textContent = (currentMarkIndex + 1) + ' / ' + marks.length;
+  }
+
+  function focusMark(index) {
+    if (marks.length === 0) return;
+    index = ((index % marks.length) + marks.length) % marks.length;
+
+    if (currentMarkIndex >= 0 && marks[currentMarkIndex]) {
+      marks[currentMarkIndex].classList.remove('current');
+    }
+    currentMarkIndex = index;
+    marks[index].classList.add('current');
+    marks[index].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    updateCountLabel();
+  }
+
+  function doSearch(q) {
+    clearMarks();
+    searchInfo.textContent = '';
+    searchCount.textContent = '';
+
+    if (!q || q.length < 2) {
+      setNavEnabled(false);
+      return;
+    }
+
+    const walker = document.createTreeWalker(
+      main,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode(node) {
+          const p = node.parentNode;
+          if (!p) return NodeFilter.FILTER_REJECT;
+          const tag = p.nodeName;
+          if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'MARK') {
+            return NodeFilter.FILTER_REJECT;
+          }
+          if (!node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        },
+      }
+    );
+
+    const lower = q.toLowerCase();
+    const textNodes = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      if (node.nodeValue.toLowerCase().includes(lower)) {
+        textNodes.push(node);
+      }
+    }
+
+    textNodes.forEach((textNode) => {
+      const text = textNode.nodeValue;
+      const frag = document.createDocumentFragment();
+      let i = 0;
+      const lowerText = text.toLowerCase();
+      while (true) {
+        const idx = lowerText.indexOf(lower, i);
+        if (idx === -1) {
+          frag.appendChild(document.createTextNode(text.slice(i)));
+          break;
+        }
+        frag.appendChild(document.createTextNode(text.slice(i, idx)));
+        const mark = document.createElement('mark');
+        mark.className = 'hit';
+        mark.textContent = text.slice(idx, idx + q.length);
+        frag.appendChild(mark);
+        marks.push(mark);
+        i = idx + q.length;
+      }
+      textNode.parentNode.replaceChild(frag, textNode);
+    });
+
+    const n = marks.length;
+    searchInfo.textContent =
+      n === 0 ? 'No results' : n + (n === 1 ? ' match' : ' matches');
+    setNavEnabled(n > 0);
+
+    if (n > 0) {
+      currentMarkIndex = 0;
+      marks[0].classList.add('current');
+      updateCountLabel();
+    }
+  }
+
+  let searchTimer;
+  search.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => doSearch(search.value.trim()), 120);
+  });
+
+  search.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (marks.length === 0) return;
+      const next = e.shiftKey ? currentMarkIndex - 1 : currentMarkIndex + 1;
+      focusMark(next);
+    }
+  });
+
+  searchPrev.addEventListener('click', () => focusMark(currentMarkIndex - 1));
+  searchNext.addEventListener('click', () => focusMark(currentMarkIndex + 1));
+
+  // ---- Keyboard shortcuts ----
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+      e.preventDefault();
+      search.focus();
+      search.select();
+    }
+    if (e.key === 'Escape' && document.activeElement === search) {
+      search.value = '';
+      doSearch('');
+      search.blur();
+    }
+  });
+
+  // ---- Back to top button ----
+  const backToTop = document.getElementById('backToTop');
+  window.addEventListener('scroll', () => {
+    backToTop.classList.toggle('visible', window.scrollY > 400);
+  });
+  backToTop.addEventListener('click', () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+})();
+</script>
+</body>
+</html>

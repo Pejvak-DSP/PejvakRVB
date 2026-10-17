@@ -1,0 +1,16 @@
+[workspace]
+members = [
+    "fdn_reverb_core",
+    "Pejvak_RVB",
+]
+resolver = "2"
+
+[patch.crates-io]
+egui-baseview = { path = "../egui-baseview-0.7.2" }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "unwind"
+strip = "debuginfo"

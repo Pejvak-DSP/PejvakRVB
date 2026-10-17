@@ -1,0 +1,36 @@
+[package]
+name = "Pejvak_RVB"
+version = "1.0.0"
+edition = "2021"
+authors = ["Amin Yousefinejad <info@pejvakdsp.com>"]
+description = "PEJVAK RVB – Hybrid Algorithmic Reverb VST3/CLAP"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/Pejvak-DSP/PejvakRVB"
+homepage = "https://github.com/Pejvak-DSP"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = ["gui-egui"]
+gui-egui = ["dep:egui", "dep:nice-plug-egui", "dep:rfd", "dep:egui-baseview", "dep:image"]
+dev-checks = ["nice-plug/assert_process_allocs"]
+
+[dependencies]
+egui = { version = "0.36", optional = true }
+egui-baseview = { version = "0.7.2", default-features = false, features = ["wgpu"], optional = true }
+nice-plug-egui = { version = "0.5.1", default-features = false, features = ["wgpu", "keyboard_focus_workaround"], optional = true }
+nice-plug = { version = "0.4.2", features = ["unsafe_flush_denormals"] }
+rfd = { version = "0.15", optional = true }
+# PNG decoder for the embedded logo in the About modal.
+# Only the `png` feature is enabled — the `image` crate's other
+# decoders (JPEG, GIF, WebP, …) are not needed and are disabled to
+# keep the binary small.
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+fdn_reverb_core = { path = "../fdn_reverb_core" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+] }
