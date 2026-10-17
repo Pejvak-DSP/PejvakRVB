@@ -1,0 +1,47 @@
+name: Build macOS
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger the workflow only when a version tag (e.g., v1.0.0) is pushed
+
+jobs:
+  build-macos:
+    runs-on: macos-latest # Use the latest macOS virtual machine provided by GitHub
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # Add both targets: Apple Silicon and Intel
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - name: Install cargo-nice-plug
+        run: cargo install cargo-nice-plug
+
+      # Build the plugin for Apple Silicon (M1/M2/M3 processors)
+      - name: Build for Apple Silicon
+        run: cargo nice-plug bundle Pejvak_RVB --release --target aarch64-apple-darwin
+
+      # Build the plugin for Intel processors
+      - name: Build for Intel
+        run: cargo nice-plug bundle Pejvak_RVB --release --target x86_64-apple-darwin
+
+      # Combine both architectures into a single Universal binary using lipo
+      - name: Create Universal Binary
+        run: |
+          mkdir -p target/universal/release
+          lipo -create \
+            target/aarch64-apple-darwin/release/libPejvak_RVB.dylib \
+            target/x86_64-apple-darwin/release/libPejvak_RVB.dylib \
+            -output target/universal/release/libPejvak_RVB.dylib
+
+      # Upload the compiled universal binary as a downloadable artifact in GitHub Actions
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pejvak_RVB-macOS
+          path: target/universal/release/
