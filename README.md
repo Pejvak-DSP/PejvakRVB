@@ -192,7 +192,7 @@ PEJVAK RVB stands on the shoulders of giants. Huge thanks to:
 - **FFDN Theory** — Fagerström et al. (DAFx 2020) and Schlecht & Habets (IEEE TSP 2017)
 - **Granular Design** — Curtis Roads, *Microsound* (MIT Press, 2001)
 
-Built with ❤️ using Rust, `nice-plug`, `egui`, and `wide`.
+Built with Rust, `nice-plug`, `egui`, and `wide`.
 
 ---
 
