@@ -3,15 +3,14 @@ name: Build macOS
 on:
   push:
     tags:
-      - 'v*' # Trigger only when a version tag (e.g., v1.0.0) is pushed
+      - 'v*'
 
-# Grant the workflow permission to create a Release
 permissions:
   contents: write
 
 jobs:
   build-macos:
-    runs-on: macos-latest # Use the latest macOS virtual machine
+    runs-on: macos-latest
 
     steps:
       - name: Checkout code
@@ -25,30 +24,62 @@ jobs:
       - name: Install cargo-nice-plug
         run: cargo install cargo-nice-plug
 
-      # Build for Apple Silicon (M1/M2/M3)
       - name: Build for Apple Silicon
         run: cargo nice-plug bundle Pejvak_RVB --release --target aarch64-apple-darwin
 
-      # Build for Intel
       - name: Build for Intel
         run: cargo nice-plug bundle Pejvak_RVB --release --target x86_64-apple-darwin
 
-      # Combine both architectures into a single Universal binary
-      - name: Create Universal Binary
+      - name: Create Universal Binary and Strip
         run: |
           mkdir -p target/universal/release
           lipo -create \
             target/aarch64-apple-darwin/release/libPejvak_RVB.dylib \
             target/x86_64-apple-darwin/release/libPejvak_RVB.dylib \
             -output target/universal/release/libPejvak_RVB.dylib
+          
+          strip -x target/universal/release/libPejvak_RVB.dylib
 
-      # Zip the bundled folder so it can be easily downloaded
-      - name: Package Plugins
+      - name: Update Bundles with Universal Binary
         run: |
-          cd target/universal/release
-          zip -r ../../../PEJVAK_RVB_macOS.zip .
+          BUNDLE_DIR="target/aarch64-apple-darwin/bundled"
+          find "$BUNDLE_DIR" -type f -path "*/Contents/MacOS/*" -exec cp target/universal/release/libPejvak_RVB.dylib {} \;
+          find "$BUNDLE_DIR" -type f -path "*/Contents/MacOS/*" -exec chmod +x {} \;
 
-      # Upload to GitHub Releases automatically
+      - name: Create Installer Script
+        run: |
+          BUNDLE_DIR="target/aarch64-apple-darwin/bundled"
+          cd "$BUNDLE_DIR"
+          
+          cat << 'EOF' > "Install PEJVAK RVB.command"
+          #!/bin/bash
+          echo "====================================="
+          echo " Installing PEJVAK RVB for macOS"
+          echo "====================================="
+          
+          mkdir -p ~/Library/Audio/Plug-Ins/VST3
+          mkdir -p ~/Library/Audio/Plug-Ins/CLAP
+          
+          echo "Copying VST3..."
+          cp -R "PEJVAK RVB.vst3" ~/Library/Audio/Plug-Ins/VST3/
+          
+          echo "Copying CLAP..."
+          cp -R "Pejvak_RVB.clap" ~/Library/Audio/Plug-Ins/CLAP/
+          
+          echo "Removing macOS quarantine attribute..."
+          xattr -cr ~/Library/Audio/Plug-Ins/VST3/"PEJVAK RVB.vst3"
+          xattr -cr ~/Library/Audio/Plug-Ins/CLAP/Pejvak_RVB.clap
+          
+          echo ""
+          echo "✅ Installation Complete! Please restart your DAW."
+          echo "You can close this window."
+          read -p "Press Enter to exit..."
+          EOF
+          
+          chmod +x "Install PEJVAK RVB.command"
+          
+          zip -r ../../../PEJVAK_RVB_macOS.zip *
+
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
