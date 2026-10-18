@@ -61,63 +61,16 @@ impl Default for RepaintNotifier {
 /// Settings used when creating a new window
 #[derive(Debug, Clone)]
 pub struct EguiWindowSettings {
-    /// The window title.
     pub title: String,
-
-    /// The size of the window, either in physical or logical coordinates.
     pub size: Size,
-
-    /// The minimum window size. Set to `None` for no minimum size.
     pub min_size: Option<Size>,
-    /// The maximum window size. Set to `None` for no maximum size.
     pub max_size: Option<Size>,
-
-    /// Whether the window can be resized.
     pub resizable: bool,
-
-    /// The amount of zoom (scaling) to apply. This is applied on top of the
-    /// system's native scaling factor.
-    ///
-    /// The zoom factor can also be changed later with
-    /// [`Context::set_zoom_factor()`](egui::Context::set_zoom_factor).
     pub zoom_factor: f32,
-
-    /// The graphics configuration
     pub graphics: GraphicsConfig,
-
-    /// If the window is to be embedded in a parent window, the handle to that window.
-    ///
-    /// If `None`, the window will be standalone.
     pub parent: Option<ParentWindowHandle>,
-
-    /// If the window expects to have a parent when first displayed.
-    ///
-    /// Setting this will delay the actual creation of the window until the parent is set (unless
-    /// the window is shown first).
-    ///
-    /// If the `parent` field is already set, this does nothing and is ignored.
     pub wait_for_parent: bool,
-
-    /// A fallback scale factor, if Baseview couldn't get one from the platform.
-    ///
-    /// If the platform does already provide an accurate scaling factor, this doesn't do anything.
-    ///
-    /// If the given fallback scale factor is actually useful and different from the current one
-    /// (1.0 by default), this will resize and redraw the window accordingly.
-    ///
-    /// # Platform compatibility notes.
-    ///
-    /// On Win32, this value is used if running on early versions of Windows 10 (or earlier).
-    ///
-    /// On X11, this value is used if no `Xft.dpi`setting is set.
-    ///
-    /// On macOS, this function is always a no-op.
     pub fallback_scale_factor: Option<f64>,
-
-    /// A realtime-safe handle to request an update & repaint for an egui app.
-    ///
-    /// This can be used, for example, to notify the GUI that the value of a decibel
-    /// meter has changed.
     pub repaint_notifier: Option<RepaintNotifier>,
 }
 
@@ -127,63 +80,42 @@ impl EguiWindowSettings {
         Self::default()
     }
 
-    /// The window title.
     #[inline]
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
         self.title = title.into();
         self
     }
 
-    /// The size of the window, either in physical or logical coordinates.
     #[inline]
     pub fn with_size(mut self, size: impl Into<Size>) -> Self {
         self.size = size.into();
         self
     }
 
-    /// Sets whether the window can be resized.
-    ///
-    /// Defaults to `true`.
     #[inline]
     pub fn with_resizable(mut self, resizable: bool) -> Self {
         self.resizable = resizable;
         self
     }
 
-    /// The minimum window size. Set to `None` for no minimum size.
-    ///
-    /// Defaults to `None`.
     #[inline]
     pub fn with_min_size<S: Into<Size>>(mut self, min_size: Option<S>) -> Self {
         self.min_size = min_size.map(|s| s.into());
         self
     }
 
-    /// The maximum window size. Set to `None` for no maximum size.
-    ///
-    /// Defaults to `None`.
     #[inline]
     pub fn with_max_size<S: Into<Size>>(mut self, max_size: Option<S>) -> Self {
         self.max_size = max_size.map(|s| s.into());
         self
     }
 
-    /// The amount of zoom (scaling) to apply. This is applied on top of the
-    /// system's native scaling factor.
-    ///
-    /// This is ignored if [`size`](EguiWindowSettings::size) is in physical units.
-    ///
-    /// The zoom factor can also be changed later with
-    /// [`Context::set_zoom_factor()`](egui::Context::set_zoom_factor).
     #[inline]
     pub fn with_zoom_factor(mut self, zoom_factor: f32) -> Self {
         self.zoom_factor = zoom_factor;
         self
     }
 
-    /// If the window is to be embedded in a parent window, the handle to that window.
-    ///
-    /// If `None`, the window will be standalone.
     #[inline]
     pub fn with_parent<'a, P: HasWindowHandle + 'a>(
         mut self,
@@ -193,37 +125,29 @@ impl EguiWindowSettings {
         self
     }
 
-    /// Sets [`wait_for_parent`](Self::wait_for_parent) to the given value.
     pub fn with_wait_for_parent(mut self, wait_for_parent: bool) -> Self {
         self.wait_for_parent = wait_for_parent;
         self
     }
 
-    /// Sets [`wait_for_parent`](Self::wait_for_parent) to `true`.
     #[inline]
     pub fn wait_for_parent(mut self) -> Self {
         self.wait_for_parent = true;
         self
     }
 
-    /// Sets [`fallback_scale_factor`](Self::fallback_scale_factor) to the given value.
     #[inline]
     pub fn with_fallback_scale_factor(mut self, scale_factor: impl Into<Option<f64>>) -> Self {
         self.fallback_scale_factor = scale_factor.into();
         self
     }
 
-    /// The graphics configuration
     #[inline]
     pub fn with_graphics_config(mut self, config: GraphicsConfig) -> Self {
         self.graphics = config;
         self
     }
 
-    /// A clone of the realtime-safe handle to request a update & repaint for an egui app.
-    ///
-    /// This can be used, for example, to notify the GUI that the value of a decibel
-    /// meter has changed.
     #[inline]
     pub fn with_repaint_notifier(mut self, repaint_notifier: RepaintNotifier) -> Self {
         self.repaint_notifier = Some(repaint_notifier);
@@ -270,51 +194,30 @@ impl Frame {
         }
     }
 
-    /// Set the clear color of the renderer.
     pub fn set_clear_color(&mut self, clear_color: Rgba) {
         self.clear_color = clear_color;
     }
 
-    /// Set how to handle capturing key events from the host.
     pub fn set_key_capture(&mut self, key_capture: KeyCapture) {
         self.key_capture = key_capture;
     }
 
-    /// Access the internal baseview window.
     pub fn baseview_window(&self) -> &WindowContext {
         &self.window
     }
 
-    /// A reference to the underlying
-    /// [glow](https://docs.rs/glow/0.17.0/x86_64-unknown-linux-gnu/glow/index.html)
-    /// (OpenGL) context.
-    ///
-    /// This can be used, for instance, to:
-    ///
-    /// * Render things to offscreen buffers.
-    /// * Read the pixel buffer from the previous frame (glow::Context::read_pixels).
-    /// * Render things behind the egui windows.
-    ///
-    /// Note that all egui painting is deferred to after the call to App::ui
-    /// (egui only collects egui::Shapes and then egui-baseview paints them all in
-    /// one go later on).
     #[cfg(feature = "opengl")]
     pub fn gl(&self) -> &std::sync::Arc<egui_glow::glow::Context> {
         &self.renderer.glow_context
     }
 }
 
-/// Describes how to handle capturing key events from the host.
 #[derive(Default, Debug, Clone, PartialEq)]
 pub enum KeyCapture {
     #[default]
-    /// All keys will be captured from the host.
     CaptureAll,
-    /// No keys will be captured from the host.
     IgnoreAll,
-    /// Only the given keys will be captured from the host.
     CaptureKeys(Vec<keyboard_types::Key>),
-    /// All keys except the given ones will be captured from the host.
     IgnoreKeys(Vec<keyboard_types::Key>),
 }
 
@@ -325,7 +228,6 @@ struct EguiWindowInner<A: App> {
     frame: Frame,
 }
 
-/// Handles an egui-baseview application
 pub struct EguiWindow<A: App> {
     inner: RefCell<EguiWindowInner<A>>,
     egui_input: RefCell<egui::RawInput>,
@@ -338,10 +240,7 @@ pub struct EguiWindow<A: App> {
     repaint_after: Arc<Mutex<Option<Instant>>>,
     repaint_notifier: Option<RepaintNotifier>,
     modifiers: Cell<egui::Modifiers>,
-
-    // Re-use the allocations from the previous output.
     full_output: RefCell<FullOutput>,
-
     pub window: WindowContext,
 }
 
@@ -446,19 +345,10 @@ impl<A: App> EguiWindow<A> {
         })
     }
 
-    /// Open a new window.
-    ///
-    /// * `settings` - The settings of the window.
-    /// * `app` - The application to run.
     pub fn create(settings: EguiWindowSettings, app: A) -> Result<Window, baseview::Error> {
         Self::create_with_host(settings, app, None)
     }
 
-    /// Open a new window.
-    ///
-    /// * `settings` - The settings of the window.
-    /// * `app` - The application to run.
-    /// * `host` - The baseview ['Host'](baseview::host::Host) callbacks.
     pub fn create_with_host(
         settings: EguiWindowSettings,
         app: A,
@@ -503,7 +393,6 @@ impl<A: App> EguiWindow<A> {
     }
 }
 
-/// Update the pressed key modifiers when a mouse event has sent a new set of modifiers.
 fn update_modifiers(
     old_modifiers: &Cell<egui::Modifiers>,
     new_modifiers: &Modifiers,
@@ -544,11 +433,11 @@ impl<A: App> WindowHandler for EguiWindow<A> {
             let mut repaint_after = self.repaint_after.lock().unwrap();
             let repaint_after = &mut *repaint_after;
 
-            if let Some(instant) = &repaint_after
-                && Instant::now() >= *instant
-            {
-                do_repaint_now = true;
-                *repaint_after = None;
+            if let Some(instant) = &repaint_after {
+                if instant <= &Instant::now() {
+                    do_repaint_now = true;
+                    *repaint_after = None;
+                }
             }
         }
 
@@ -576,7 +465,6 @@ impl<A: App> WindowHandler for EguiWindow<A> {
             (egui_input.take(), logical_size)
         };
 
-        // Re-use the allocations from the previous output.
         let mut full_output = self.full_output.borrow_mut();
 
         *full_output = {
@@ -592,7 +480,6 @@ impl<A: App> WindowHandler for EguiWindow<A> {
         };
 
         let Some(viewport_output) = full_output.viewport_output.get(&self.viewport_id) else {
-            // The main window was closed by egui.
             self.window.request_close();
             return Ok(());
         };
@@ -660,14 +547,14 @@ impl<A: App> WindowHandler for EguiWindow<A> {
             for command in full_output.platform_output.commands.drain(..) {
                 match command {
                     egui::OutputCommand::CopyText(text) => {
-                        if let Some(clipboard_ctx) = clipboard_ctx.as_mut()
-                            && let Err(err) = clipboard_ctx.set_contents(text)
-                        {
-                            #[cfg(any(feature = "tracing", feature = "log"))]
-                            error!("Copy/Cut error: {}", err);
+                        if let Some(clipboard_ctx) = clipboard_ctx.as_mut() {
+                            if let Err(err) = clipboard_ctx.set_contents(text) {
+                                #[cfg(any(feature = "tracing", feature = "log"))]
+                                error!("Copy/Cut error: {}", err);
 
-                            #[cfg(not(any(feature = "tracing", feature = "log")))]
-                            let _ = err;
+                                #[cfg(not(any(feature = "tracing", feature = "log")))]
+                                let _ = err;
+                            }
                         }
                     }
                     egui::OutputCommand::CopyImage(_) => {
@@ -695,14 +582,12 @@ impl<A: App> WindowHandler for EguiWindow<A> {
             self.window.set_mouse_cursor(cursor_icon)?;
         }
 
-        // A temporary workaround for keyboard input not working sometimes.
-        // See https://codeberg.org/RustAudio/egui-baseview/issues/20
         #[cfg(feature = "keyboard_focus_workaround")]
         {
             if !full_output.platform_output.events.is_empty()
                 || full_output.platform_output.ime.is_some()
             {
-                self.window.focus().unwrap();  
+                self.window.focus().unwrap();
             }
         }
 
@@ -746,10 +631,6 @@ impl<A: App> WindowHandler for EguiWindow<A> {
     fn on_event(&self, event: Event) -> EventStatus {
         let mut return_status = EventStatus::Captured;
 
-        // Parent/embedded windows do not always gain keyboard focus
-        // Automatically on click. Request focus explicitly before forwarding the event.
-        //
-        // TODO: Check if this is still necessary.
         if matches!(
             event,
             baseview::Event::Mouse(baseview::MouseEvent::ButtonPressed { .. })
@@ -782,29 +663,29 @@ impl<A: App> WindowHandler for EguiWindow<A> {
                 baseview::MouseEvent::ButtonPressed { button, modifiers } => {
                     update_modifiers(&self.modifiers, modifiers, &mut egui_input);
 
-                    if let Some(pos) = self.pointer_logical_pos.get()
-                        && let Some(button) = crate::translate::translate_mouse_button(*button)
-                    {
-                        egui_input.events.push(egui::Event::PointerButton {
-                            pos,
-                            button,
-                            pressed: true,
-                            modifiers: self.modifiers.get(),
-                        });
+                    if let Some(pos) = self.pointer_logical_pos.get() {
+                        if let Some(button) = crate::translate::translate_mouse_button(*button) {
+                            egui_input.events.push(egui::Event::PointerButton {
+                                pos,
+                                button,
+                                pressed: true,
+                                modifiers: self.modifiers.get(),
+                            });
+                        }
                     }
                 }
                 baseview::MouseEvent::ButtonReleased { button, modifiers } => {
                     update_modifiers(&self.modifiers, modifiers, &mut egui_input);
 
-                    if let Some(pos) = self.pointer_logical_pos.get()
-                        && let Some(button) = crate::translate::translate_mouse_button(*button)
-                    {
-                        egui_input.events.push(egui::Event::PointerButton {
-                            pos,
-                            button,
-                            pressed: false,
-                            modifiers: self.modifiers.get(),
-                        });
+                    if let Some(pos) = self.pointer_logical_pos.get() {
+                        if let Some(button) = crate::translate::translate_mouse_button(*button) {
+                            egui_input.events.push(egui::Event::PointerButton {
+                                pos,
+                                button,
+                                pressed: false,
+                                modifiers: self.modifiers.get(),
+                            });
+                        }
                     }
                 }
                 baseview::MouseEvent::WheelScrolled {
@@ -818,7 +699,6 @@ impl<A: App> WindowHandler for EguiWindow<A> {
                         baseview::ScrollDelta::Lines { x, y } => {
                             (egui::MouseWheelUnit::Line, egui::vec2(*x, *y))
                         }
-
                         baseview::ScrollDelta::Pixels { x, y } => (
                             egui::MouseWheelUnit::Point,
                             egui::vec2(*x, *y) * self.window.scale_factor() as f32,
@@ -826,10 +706,6 @@ impl<A: App> WindowHandler for EguiWindow<A> {
                     };
 
                     if cfg!(target_os = "macos") {
-                        // This is still buggy in winit despite
-                        // https://github.com/rust-windowing/winit/issues/1695 being closed
-                        //
-                        // TODO: See if this is an issue in baseview as well.
                         delta.x *= -1.0;
                     }
 
@@ -864,10 +740,6 @@ impl<A: App> WindowHandler for EguiWindow<A> {
                 }
 
                 if pressed {
-                    // VirtualKeyCode::Paste etc in winit are broken/untrustworthy,
-                    // so we detect these things manually:
-                    //
-                    // TODO: See if this is an issue in baseview as well.
                     if is_cut_command(modifiers, event.code) {
                         egui_input.events.push(egui::Event::Cut);
                     } else if is_copy_command(modifiers, event.code) {
@@ -886,11 +758,10 @@ impl<A: App> WindowHandler for EguiWindow<A> {
                                 }
                             }
                         }
-                    } else if let keyboard_types::Key::Character(written) = &event.key
-                        && !modifiers.ctrl
-                        && !modifiers.command
-                    {
-                        egui_input.events.push(egui::Event::Text(written.clone()));
+                    } else if let keyboard_types::Key::Character(written) = &event.key {
+                        if !modifiers.ctrl && !modifiers.command {
+                            egui_input.events.push(egui::Event::Text(written.clone()));
+                        }
                     }
                 }
 
@@ -939,8 +810,6 @@ impl<A: App> WindowHandler for EguiWindow<A> {
             self.inner.borrow().egui_ctx.request_repaint();
         }
 
-        // For keyboard events, also check if egui actually wants keyboard input
-        // This allows DAW shortcuts (spacebar, etc.) to pass through when no text field is focused
         match &event {
             baseview::Event::Keyboard(_) => {
                 let egui_ctx = &self.inner.borrow().egui_ctx;
