@@ -38,25 +38,30 @@ jobs:
             target/x86_64-apple-darwin/release/libPejvak_RVB.dylib \
             -output target/universal/release/libPejvak_RVB.dylib
           
+          # کاهش حجم فایل برای اسکن سریع‌تر
           strip -x target/universal/release/libPejvak_RVB.dylib
 
       - name: Update Bundles with Universal Binary
         run: |
-          BUNDLE_DIR="target/aarch64-apple-darwin/bundled"
+          # مسیر خروجی نهایی nice-plug
+          BUNDLE_DIR="target/bundled"
+          
           find "$BUNDLE_DIR" -type f -path "*/Contents/MacOS/*" -exec cp target/universal/release/libPejvak_RVB.dylib {} \;
           find "$BUNDLE_DIR" -type f -path "*/Contents/MacOS/*" -exec chmod +x {} \;
 
       - name: Create Installer Script
         run: |
-          BUNDLE_DIR="target/aarch64-apple-darwin/bundled"
+          BUNDLE_DIR="target/bundled"
           cd "$BUNDLE_DIR"
           
+          # ساخت اسکریپت نصب خودکار
           cat << 'EOF' > "Install PEJVAK RVB.command"
           #!/bin/bash
           echo "====================================="
           echo " Installing PEJVAK RVB for macOS"
           echo "====================================="
           
+          # کپی کردن پلاگین‌ها به پوشه کاربر
           mkdir -p ~/Library/Audio/Plug-Ins/VST3
           mkdir -p ~/Library/Audio/Plug-Ins/CLAP
           
@@ -66,6 +71,7 @@ jobs:
           echo "Copying CLAP..."
           cp -R "Pejvak_RVB.clap" ~/Library/Audio/Plug-Ins/CLAP/
           
+          # حذف برچسب قرنطینه (Quarantine) که باعث هنگ کردن DAW می‌شود
           echo "Removing macOS quarantine attribute..."
           xattr -cr ~/Library/Audio/Plug-Ins/VST3/"PEJVAK RVB.vst3"
           xattr -cr ~/Library/Audio/Plug-Ins/CLAP/Pejvak_RVB.clap
@@ -76,9 +82,11 @@ jobs:
           read -p "Press Enter to exit..."
           EOF
           
+          # اجرایی کردن اسکریپت
           chmod +x "Install PEJVAK RVB.command"
           
-          zip -r ../../../PEJVAK_RVB_macOS.zip *
+          # زیپ کردن همه چیز
+          zip -r ../../PEJVAK_RVB_macOS.zip *
 
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
