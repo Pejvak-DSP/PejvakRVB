@@ -9349,6 +9349,18 @@ fn draw_about_body(ui: &mut Ui, t: &Theme, body_col: Color32, scale: f32) {
                 .size(10.0 * scale)
                 .color(body_col),
         );
+
+        // ---- Official website link ----
+        // Opens in the user's default browser when clicked. Rendered
+        // in the theme's accent colour so it reads as clickable.
+        ui.add_space(4.0 * scale);
+        ui.hyperlink_to(
+            egui::RichText::new("pejvak-dsp.github.io")
+                .size(10.0 * scale)
+                .color(t.accent),
+            "https://pejvak-dsp.github.io",
+        );
+
         ui.add_space(4.0 * scale);
         let _ = ui.label(
             egui::RichText::new("GPL-3.0-or-later")

@@ -10,10 +10,31 @@ permissions:
 
 jobs:
   # ==========================================================================
+  # Tests and lints — runs once, blocks all builds if it fails
+  # ==========================================================================
+  test:
+    name: Test and Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run DSP tests
+        run: cargo test -p fdn_reverb_core
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # ==========================================================================
   # Windows
   # ==========================================================================
   build-windows:
     name: Build Windows
+    needs: [test]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,13 +64,16 @@ jobs:
           powershell -Command "Get-ChildItem -Path .\* -Recurse | Unblock-File"
 
           echo.
-          echo Copying plugins to system folders...
+          echo Creating plugin directories...
           mkdir "C:\Program Files\Common Files\VST3\PEJVAK RVB" 2>nul
+          mkdir "C:\Program Files\Common Files\CLAP" 2>nul
+
+          echo Copying plugins to system folders...
           copy /Y "PEJVAK RVB.vst3" "C:\Program Files\Common Files\VST3\PEJVAK RVB\"
           copy /Y "Pejvak_RVB.clap" "C:\Program Files\Common Files\CLAP\"
 
           echo.
-          echo ✅ Installation Complete! Please restart your DAW.
+          echo Installation Complete! Please restart your DAW.
           pause
           "@
 
@@ -66,6 +90,7 @@ jobs:
   # ==========================================================================
   build-macos:
     name: Build macOS
+    needs: [test]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -126,7 +151,7 @@ jobs:
           xattr -cr ~/Library/Audio/Plug-Ins/CLAP/Pejvak_RVB.clap
 
           echo ""
-          echo "✅ Installation Complete! Please restart your DAW."
+          echo "Installation Complete! Please restart your DAW."
           read -p "Press Enter to exit..."
           EOF
 
@@ -143,6 +168,7 @@ jobs:
   # ==========================================================================
   build-linux:
     name: Build Linux
+    needs: [test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -183,7 +209,7 @@ jobs:
   # ==========================================================================
   release:
     name: Create GitHub Release
-    needs: [build-windows, build-macos, build-linux]
+    needs: [test, build-windows, build-macos, build-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -212,8 +238,10 @@ jobs:
             ' CHANGELOG.md > release-notes.md
 
             if [ ! -s release-notes.md ]; then
-              echo "## What's Changed in $GITHUB_REF_NAME" > release-notes.md
-              git log --pretty=format:"* %s (%h)" -20 >> release-notes.md
+              {
+                echo "## What's Changed in $GITHUB_REF_NAME"
+                git log --pretty=format:"* %s (%h)" -20
+              } > release-notes.md
             fi
           else
             {

@@ -1907,7 +1907,7 @@ impl Plugin for PejvakRvbPlugin {
     // Brand, not author. The individual developer is credited in
     // Cargo.toml `authors`, the LICENSE file, and the About modal.
     const VENDOR: &'static str = "Pejvak DSP";
-    const URL: &'static str = "https://github.com/Pejvak-DSP";
+    const URL: &'static str = "https://pejvak-dsp.github.io";
     const EMAIL: &'static str = "info@pejvakdsp.com";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
