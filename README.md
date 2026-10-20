@@ -1,28 +1,41 @@
 <div align="center">
 
 <!-- ===== LOGO ===== -->
-<img src="manual/logo-bw.png" alt="Pejvak DSP Logo" width="180" style="margin-bottom: 20px;"/>
+<img src="manual/logo-bw.png" alt="Pejvak DSP Logo" width="180"/>
 
 # 🎛️ PEJVAK RVB
 
 **A Professional Hybrid Algorithmic Reverb — Dual Engine. Pure Rust.**
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue?style=for-the-badge&logo=github)](https://github.com/Pejvak-DSP/PejvakRVB/releases)
+[![Version](https://img.shields.io/badge/version-1.0.1-blue?style=for-the-badge&logo=github)](https://github.com/Pejvak-DSP/PejvakRVB/releases)
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-success?style=for-the-badge)](LICENSE)
 [![Rust](https://img.shields.io/badge/Built_with-Rust_🦀-orange?style=for-the-badge&logo=rust)](https://www.rust-lang.org)
-[![Platforms](https://img.shields.io/badge/Platforms-Windows_%7C_macOS_%7C_Linux-lightgrey?style=for-the-badge&logo=apple)]()
+[![Platforms](https://img.shields.io/badge/Platforms-Windows_%7C_macOS_%7C_Linux-lightgrey?style=for-the-badge)](https://github.com/Pejvak-DSP/PejvakRVB/releases)
 
-[![VST3](https://img.shields.io/badge/Format-VST3-8A2BE2?style=flat-square)]()
-[![CLAP](https://img.shields.io/badge/Format-CLAP-FF4500?style=flat-square)]()
+[![VST3](https://img.shields.io/badge/Format-VST3-8A2BE2?style=flat-square)](https://steinbergmedia.github.io/vst3_dev_portal/)
+[![CLAP](https://img.shields.io/badge/Format-CLAP-FF4500?style=flat-square)](https://cleveraudio.org)
 [![Org](https://img.shields.io/badge/Publisher-Pejvak_DSP-cyan?style=flat-square)](https://github.com/Pejvak-DSP)
 
 </div>
 
 <br>
 
-> **PEJVAK RVB** is a high-end algorithmic reverb plugin written entirely in Rust. It combines two completely independent DSP engines in a single package — a bit-exact port of the legendary CloudSeed, and a modern Filtered Feedback Delay Network (FFDN) — and layers a rich, click-free texture system on top.
+> **PEJVAK RVB** is a high-end algorithmic reverb plugin written entirely in Rust. It combines two completely independent DSP engines in a single package — a faithful port of the legendary CloudSeed, and a modern Filtered Feedback Delay Network (FFDN) — and layers a rich, click-free texture system on top.
 >
 > **Design Goals:** Pure `f64` DSP, zero allocation on the audio thread, and a UI that feels as good as it sounds.
+
+---
+
+## Table of Contents
+
+- [Features](#-features)
+- [Screenshots](#-screenshots)
+- [Installation](#-installation)
+- [Building from Source](#️-building-from-source)
+- [Project Structure](#-project-structure)
+- [Contributing](#-contributing)
+- [Credits](#-credits)
+- [License](#-license)
 
 ---
 
@@ -34,8 +47,8 @@ Switch seamlessly between two distinct worlds of reverb:
 
 | Engine | Character | Highlights |
 | :--- | :--- | :--- |
-| **☁️ CloudSeed** | Warm, dense, and deep | Bit-exact port of Valdemar Erlingsson's *CloudSeed* (legacy-v1). 49 parameters, deep early-diffusion front-end, and Velvet-Noise diffusion. |
-| **🌐 FFDN** | Clean, modern, and characterful | Filtered Feedback Delay Network. Features Householder & Velvet matrices, frequency-dependent attenuation, Velvet saturation, spectral tilt, and 3 dynamics stages (Attack / Ducking / Gate). |
+| **☁️ CloudSeed** | Warm, dense, and deep | Faithful port of [Valdemar Erlingsson's *CloudSeed* (legacy-v1)](https://github.com/ValdemarOrn/CloudSeed/tree/legacy-v1). 49 parameters, deep early-diffusion front-end, and Velvet-Noise diffusion. |
+| **🌐 FFDN** | Clean, modern, and characterful | Filtered Feedback Delay Network. Features Householder & Velvet matrices, frequency-dependent attenuation, loop HP/LP filtering, mid-focus, modulated delay lines, Velvet saturation, spectral tilt, early reflections, and 3 dynamics stages (Attack / Ducking / Gate). |
 
 *Switching engines instantly clears the departing engine's buffers, ensuring zero bleed-over from stale tails.*
 
@@ -50,7 +63,7 @@ Available on **both** engines. Drag the chips in the Signal Chain to reorder the
 - **Scatter:** Overlapping grains with random start positions.
 - **Bloom:** Slow-rising reverse-reverb character.
 
-*Every layer features a 20 ms anti-click smoother and resets its buffers on the rising edge from zero.*
+*Every layer features a 20 ms anti-click smoother and clears its buffers on the rising edge from zero.*
 
 ### 🔮 ILLUSION — Granular Cloud
 
@@ -59,18 +72,19 @@ A beautiful granular cloud with pitched overtones. Features 8 parameters (Spark,
 ### 🚀 Everything Else
 
 - 🕹️ **Drag-and-Drop Signal Chain** with smooth animations and cursor feedback.
-- ↩️ **Undo / Redo:** 50 steps with parameter-name tooltips.
-- 🛑 **TX Kill Switch:** One-click master switch for all texture layers.
-- 🎛️ **96 Factory Presets** across 16 color-coded categories.
+- ↩️ **Undo / Redo:** 50 steps with parameter-name tooltips. Undo never cuts the reverb tail.
+- 🛑 **TX Kill Switch:** One-click master switch for all six texture layers and ILLUSION.
+- 🎛️ **100 Factory Presets** across 16 color-coded categories.
 - 🎨 **Dark / Light theme**, resizable UI (70% – 200%).
 - 📖 **Bundled HTML Manual:** Features a sticky header, live search, and beautiful layout.
+- 🧹 **Clippy-clean, bit-identical DSP:** Every output-stage gain is per-sample smoothed, neutral settings are covered by `*_is_bit_identical` tests, and the full 33-test DSP suite passes on every release.
 
 ---
 
 ## 📸 Screenshots
 
 <div align="center">
-  <img src="screenshots/main.png" alt="CloudSeed Engine" width="800" style="border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); margin-bottom: 20px;"/>
+  <img src="screenshots/main.png" alt="CloudSeed Engine" width="800"/>
   <br>
   <i>CloudSeed Engine — Warm and Dense</i>
 </div>
@@ -78,7 +92,7 @@ A beautiful granular cloud with pitched overtones. Features 8 parameters (Spark,
 <br>
 
 <div align="center">
-  <img src="screenshots/ffdn.png" alt="FFDN Engine" width="800" style="border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); margin-bottom: 20px;"/>
+  <img src="screenshots/ffdn.png" alt="FFDN Engine" width="800"/>
   <br>
   <i>FFDN Engine — Modern and Characterful</i>
 </div>
@@ -86,40 +100,58 @@ A beautiful granular cloud with pitched overtones. Features 8 parameters (Spark,
 <br>
 
 <div align="center">
-  <img src="screenshots/texture.png" alt="Texture Rack" width="800" style="border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);"/>
+  <img src="screenshots/texture.png" alt="Texture Rack" width="800"/>
   <br>
-  <i>Texture Rack & ILLUSION</i>
+  <i>Texture Rack &amp; ILLUSION</i>
 </div>
 
 ---
 
 ## 📦 Installation
 
+Download the archive for your platform from the [Releases](https://github.com/Pejvak-DSP/PejvakRVB/releases) page.
+
+Every release ships with **one-click installer scripts** that handle the platform-specific quirks (Mark-of-the-Web unblocking on Windows, Gatekeeper/quarantine on macOS). If you prefer to install manually, the commands below are equivalent.
+
 ### 🪟 Windows
 
-Copy the plugin to the standard system folders:
+**Recommended:** run `Install_Windows.bat` from the release archive. It copies both formats to the correct system folders and unblocks the files (removing the "Mark of the Web" flag that would otherwise make Windows Defender warn on every load).
+
+Manual installation (run PowerShell **as Administrator**):
 
 ```powershell
 # CLAP
+New-Item -ItemType Directory -Force -Path "C:\Program Files\Common Files\CLAP"
 Copy-Item Pejvak_RVB.clap "C:\Program Files\Common Files\CLAP\"
 
 # VST3
 New-Item -ItemType Directory -Force -Path "C:\Program Files\Common Files\VST3\PEJVAK RVB"
-Copy-Item Pejvak_RVB.vst3 "C:\Program Files\Common Files\VST3\PEJVAK RVB\"
+Copy-Item -Recurse -Force Pejvak_RVB.vst3 "C:\Program Files\Common Files\VST3\PEJVAK RVB\"
+
+# Remove the "Mark of the Web" flag
+Get-ChildItem -Recurse "C:\Program Files\Common Files\VST3\PEJVAK RVB", "C:\Program Files\Common Files\CLAP\Pejvak_RVB.clap" | Unblock-File
 ```
 
 ### 🍎 macOS (Universal Binary)
 
-Runs natively on both Intel and Apple Silicon.
+**Recommended:** double-click `Install PEJVAK RVB.command` from the release archive. It removes the quarantine attribute and clears the Gatekeeper block, so the plugin loads in any DAW without the "cannot be opened" dialog.
+
+Manual installation:
 
 ```bash
-cp -R "PEJVAK RVB.vst3" ~/Library/Audio/Plug-Ins/VST3/
-cp -R "Pejvak_RVB.clap" ~/Library/Audio/Plug-Ins/CLAP/
+mkdir -p "$HOME/Library/Audio/Plug-Ins/VST3" "$HOME/Library/Audio/Plug-Ins/CLAP"
+cp -R "PEJVAK RVB.vst3" "$HOME/Library/Audio/Plug-Ins/VST3/"
+cp -R "Pejvak_RVB.clap" "$HOME/Library/Audio/Plug-Ins/CLAP/"
+
+xattr -dr com.apple.quarantine "$HOME/Library/Audio/Plug-Ins/VST3/PEJVAK RVB.vst3"
+xattr -dr com.apple.quarantine "$HOME/Library/Audio/Plug-Ins/CLAP/Pejvak_RVB.clap"
 ```
 
-> **Note:** If macOS blocks the plugin, go to **System Settings → Privacy & Security → Open Anyway**.
+> **Note:** If macOS still blocks the plugin, go to **System Settings → Privacy & Security → Open Anyway**.
 
 ### 🐧 Linux
+
+Distributed as a simple `tar.gz` archive — no installer script needed.
 
 ```bash
 # VST3
@@ -136,7 +168,7 @@ cp Pejvak_RVB.clap ~/.clap/
 ## 🛠️ Building from Source
 
 Ensure you have **Rust 1.98+** installed.
-(Linux users also need X11 and OpenGL development libraries.)
+(Linux users also need X11 and OpenGL development libraries — see [CONTRIBUTING.md](CONTRIBUTING.md#development-setup).)
 
 ```bash
 git clone https://github.com/Pejvak-DSP/PejvakRVB.git
@@ -145,6 +177,18 @@ cargo nice-plug bundle Pejvak_RVB --release
 ```
 
 The bundled plugins will appear in `target/bundled/`.
+
+### ✅ Verifying the Build
+
+The DSP suite is bit-identical by design — every neutral/default value is covered by a `*_is_bit_identical` test, and every stability-critical stage has a `*_keeps_network_stable` test. Before running the bundled plugins:
+
+```bash
+# 33 tests, all passing
+cargo test -p fdn_reverb_core
+
+# zero warnings across both crates, including tests
+cargo clippy --workspace --all-targets -- -D warnings
+```
 
 ### 🍏 macOS Universal Binary
 
@@ -160,6 +204,8 @@ lipo -create \
   -output target/universal/release/libPejvak_RVB.dylib
 ```
 
+The full release pipeline (all three platforms) is defined in [`.github/workflows/release.yml`](.github/workflows/release.yml).
+
 ---
 
 ## 🧱 Project Structure
@@ -168,7 +214,7 @@ lipo -create \
 PejvakRVB/
 ├── fdn_reverb_core/        ← Pure DSP core (CloudSeed, FFDN, Textures)
 │   └── src/
-│       ├── cloudseed/      ← Bit-exact CloudSeed port
+│       ├── cloudseed/      ← Faithful CloudSeed port
 │       ├── ffdn/           ← Filtered Feedback Delay Network
 │       └── texture/        ← Six texture layers + ILLUSION
 ├── Pejvak_RVB/             ← Plugin wrapper (params, UI, presets)
@@ -176,10 +222,21 @@ PejvakRVB/
 │       ├── lib.rs          ← Plugin definition & Audio thread
 │       ├── editor.rs       ← egui interface
 │       ├── manual.rs       ← HTML manual loader
-│       └── presets.rs      ← 96 factory presets
+│       └── presets.rs      ← 100 factory presets
 ├── manual/                 ← Bundled HTML manual + logo
+├── screenshots/            ← README images
+├── .github/workflows/      ← Release CI (release.yml)
+├── CHANGELOG.md
+├── CONTRIBUTING.md
+├── LICENSE
 └── Cargo.toml              ← Workspace root
 ```
+
+---
+
+## 🤝 Contributing
+
+Bug reports, feature requests, and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) first — the real-time safety and DSP rules there are strict. See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ---
 
@@ -187,9 +244,9 @@ PejvakRVB/
 
 PEJVAK RVB stands on the shoulders of giants. Huge thanks to:
 
-- **CloudSeed** — Valdemar Erlingsson (the original C++ reference)
-- **CloudReverb** — xunil-cloud (JUCE fork & modern parameter layout)
-- **FFDN Theory** — Fagerström et al. (DAFx 2020) and Schlecht & Habets (IEEE TSP 2017)
+- **CloudSeed** — [Valdemar Erlingsson](https://github.com/ValdemarOrn/CloudSeed/tree/legacy-v1) (the original reference implementation)
+- **CloudReverb** — [xunil-cloud](https://github.com/xunil-cloud/CloudReverb) (JUCE fork & modern parameter layout)
+- **FFDN Theory** — Fagerström et al., "Velvet-Noise Feedback Delay Network" (DAFx 2020); Schlecht & Habets (IEEE TSP 2017); Välimäki et al. (IEEE/ACM TASLP 2017)
 - **Granular Design** — Curtis Roads, *Microsound* (MIT Press, 2001)
 
 Built with Rust, `nice-plug`, `egui`, and `wide`.
@@ -201,7 +258,7 @@ Built with Rust, `nice-plug`, `egui`, and `wide`.
 This project is licensed under the **GNU General Public License v3.0 or later**.
 
 ```text
-Copyright (C) 2025 Pejvak DSP
+Copyright (C) 2025-2026 Pejvak DSP
 Author: Amin Yousefinejad
 ```
 

@@ -368,7 +368,6 @@ impl FfdnDelayLine {
     }
 
     /// Raw sample extraction, without any filtering.
-
     #[inline]
     fn read_raw(&mut self) -> f64 {
         let len = self.buffer.len();

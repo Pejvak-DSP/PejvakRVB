@@ -20,8 +20,8 @@ fn build(f0: fn(f64) -> f64) -> Vec<f64> {
     }
     let t0 = t[0];
     let denom = 1.0 - t0;
-    for i in 1..TABLE_SIZE {
-        t[i] = (t[i] - t0) / denom;
+    for item in t.iter_mut().skip(1) {
+        *item = (*item - t0) / denom;
     }
     t[0] = 0.0;
     t

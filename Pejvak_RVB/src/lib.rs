@@ -1526,7 +1526,7 @@ impl Default for FfdnParams {
             decorr: FloatParam::new("FfdnDecorr", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_value_to_string(Arc::new(|v| {
                     // Map 0..1 -> 1%..7% L/R delay offset.
-                    let pct = 1.0 + (v as f32) * 6.0;
+                    let pct = 1.0 + v * 6.0;
                     format!("{:.1} %", pct)
                 })),
 
@@ -2092,7 +2092,7 @@ impl PejvakRvbPlugin {
 
         for i in 0..PARAM_COUNT {
             let mut v = self.params.normalized(i);
-            if eq_off && matches!(i, 44 | 45 | 46) {
+            if eq_off && matches!(i, 44..=46) {
                 v = 0.0;
             }
             if v != self.last_pushed[i] {
@@ -2353,20 +2353,20 @@ impl PejvakRvbPlugin {
             self.params.illusion.grain.value() as f64,
         ];
 
-        for i in 0..8 {
-            if illusion_vals[i] != self.last_illusion[i] {
+        for (i, &val) in illusion_vals.iter().enumerate() {
+            if val != self.last_illusion[i] {
                 match i {
-                    0 => ctrl.set_illusion_spark(illusion_vals[i]),
-                    1 => ctrl.set_illusion_still(illusion_vals[i]),
-                    2 => ctrl.set_illusion_aura(illusion_vals[i]),
-                    3 => ctrl.set_illusion_veil(illusion_vals[i]),
-                    4 => ctrl.set_illusion_wide(illusion_vals[i]),
-                    5 => ctrl.set_illusion_tint(illusion_vals[i]),
-                    6 => ctrl.set_illusion_rate(illusion_vals[i]),
-                    7 => ctrl.set_illusion_grain(illusion_vals[i]),
+                    0 => ctrl.set_illusion_spark(val),
+                    1 => ctrl.set_illusion_still(val),
+                    2 => ctrl.set_illusion_aura(val),
+                    3 => ctrl.set_illusion_veil(val),
+                    4 => ctrl.set_illusion_wide(val),
+                    5 => ctrl.set_illusion_tint(val),
+                    6 => ctrl.set_illusion_rate(val),
+                    7 => ctrl.set_illusion_grain(val),
                     _ => {}
                 }
-                self.last_illusion[i] = illusion_vals[i];
+                self.last_illusion[i] = val;
             }
         }
 

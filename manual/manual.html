@@ -471,11 +471,8 @@ mark.hit.current {
   <div class="brand">
     <img src="logo.png" alt="PEJVAK DSP" class="brand-logo">
     PEJVAK RVB
-    <small>User Manual · v1.0.0</small>
+    <small>User Manual · v1.0.1</small>
   </div>
-  <nav id="toc">
-    <a href="#intro">1. Introduction</a>
-    
   <nav id="toc">
     <a href="#intro">1. Introduction</a>
     <a href="#install">2. Installation</a>
@@ -526,7 +523,7 @@ mark.hit.current {
 
 <header class="top">
   <h1>PEJVAK RVB</h1>
-  <div class="meta">Hybrid Algorithmic Reverb · Version 1.0.0 · GPL-3.0-or-later</div>
+  <div class="meta">Hybrid Algorithmic Reverb · Version 1.0.1 · GPL-3.0-or-later</div>
   <div class="toolbar">
     <div class="search-wrap">
       <input id="search" type="text" placeholder="Search the manual…" autocomplete="off"
@@ -564,7 +561,7 @@ mark.hit.current {
   <li><strong>ILLUSION</strong> — a granular cloud with pitched overtones and eight techniques that keep it click-free.</li>
   <li><strong>Velvet-Noise VFDN</strong> — a sparse diffusion stage inside the CloudSeed engine.</li>
   <li><strong>Undo / Redo</strong> — 50 steps with parameter-name tooltips.</li>
-  <li><strong>96 factory presets</strong> across 16 categories.</li>
+  <li><strong>100 factory presets</strong> across 16 categories.</li>
 </ul>
 </section>
 
@@ -685,6 +682,16 @@ The DSP core (<code>fdn_reverb_core</code>) has no OS-specific code, so
 its tests run identically on all three platforms. If you are contributing
 DSP changes, they can be validated without a graphical environment.
 </div>
+
+<h3>Run clippy</h3>
+<div class="diagram">cargo clippy --workspace --all-targets -- -D warnings</div>
+
+<div class="note">
+<code>--all-targets</code> is essential: without it, test code is
+silently skipped by clippy. The CI pipeline runs this exact command,
+so a PR that introduces a lint will fail the build before it can be
+merged.
+</div>
 </section>
 
 <!-- ============ 3. QUICK START ============ -->
@@ -710,7 +717,7 @@ The fastest way to hear the difference between the two engines is to load the sa
 
 <div class="diagram">┌─────────────────────────────────────────────────────────────────────────────┐
 │  PEJVAK RVB   [MAIN|TEXTURE]  [TX]  [CLOUD|FFDN]  [Bypass|Freeze|Interp]   │
-│               [↶|↷]  [Preset▾]  [☰]  [☾]                                   │
+│               [↶|↷]  [Preset▾]  [☰]  [☀]                                   │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │                    (page content — MAIN or TEXTURE)                         │
@@ -743,7 +750,7 @@ The fastest way to hear the difference between the two engines is to load the sa
 </ul>
 
 <h3 id="presets">4.3 Preset Browser</h3>
-<p>Click the preset name in the header to open the browser. It groups 96 factory presets into 16 colour-coded categories and provides:</p>
+<p>Click the preset name in the header to open the browser. It groups 100 factory presets into 16 colour-coded categories and provides:</p>
 <ul>
   <li><strong>Search box</strong> — filters the visible list as you type.</li>
   <li><strong>Init</strong> — loads the factory default state.</li>
@@ -903,7 +910,7 @@ Loading a preset from an older version is safe: the XML format is append-only, a
 <table>
   <tr><th>Control</th><th>Range</th><th>Description</th></tr>
   <tr><td>Cross</td><td>0 – 100 %</td><td>Cross-feed between L and R networks. 0 % = independent; 50 % = mono; 100 % = swapped.</td></tr>
-  <tr><td>Sat</td><td>0 – 100 %</td><td>Velvet saturation inside the feedback loop. A smooth, tubey sine-shaper with pre-gain and makeup. <em>Requires the Sat switch below.</em></td></tr>
+  <tr><td>Sat</td><td>0 – 100 %</td><td>Velvet saturation inside the feedback loop. A smooth, tubey sine-shaper with pre-gain and unity small-signal gain (no makeup). Mid-level passages get warm compression; quiet tails decay unchanged. <em>Requires the Sat switch below.</em></td></tr>
   <tr><td>Tilt Frq</td><td>100 – 10 000 Hz</td><td>Crossover of the spectral tilt filter.</td></tr>
   <tr><td>Tilt Amt</td><td>0 – 100 %</td><td>Spectral tilt. 0 % = bass-heavy, 50 % = flat, 100 % = treble-heavy. <em>Requires the Tilt switch below.</em></td></tr>
   <tr><td>Sat / Tilt switches</td><td>on/off</td><td>Individual enables for the two processing stages.</td></tr>
@@ -943,8 +950,8 @@ Early reflections are always on when the CHARACTER card is on. Their level is co
 <table>
   <tr><th>Control</th><th>Range</th><th>Description</th></tr>
   <tr><td>Attack</td><td>0 – 100 %</td><td>Softens the initial transient of the wet signal. 0 % = instant; up to 500 ms swell at 100 %.</td></tr>
-  <tr><td>Ducking</td><td>0 – 100 %</td><td>Reduces the wet while dry input is present, recovers in silence. Classic vocal reverb behaviour.</td></tr>
-  <tr><td>Gate</td><td>0 – 100 %</td><td>Progressively silences the wet once its envelope drops below a threshold. Soft, click-free close.</td></tr>
+  <tr><td>Ducking</td><td>0 – 100 %</td><td>Reduces the wet while dry input is present, recovers in silence. Classic vocal reverb behaviour. Up to −24 dB of attenuation at full amount.</td></tr>
+  <tr><td>Gate</td><td>0 – 100 %</td><td>Progressively silences the wet once its envelope drops below a threshold. Threshold range −60 dBFS to −10 dBFS, with a squared fade for a decisive close.</td></tr>
 </table>
 <div class="note">
 The FFDN <strong>INPUT</strong> card shows three knobs (Pre-Dly, Low Cut, High Cut). The <em>Blend</em> knob is not present because the FFDN already has the <strong>Cross</strong> control in CHARACTER, which covers the same range more cleanly.
@@ -991,7 +998,7 @@ Placing SHIMMER last produces a smooth, top-down wash. Placing it first adds the
 </table>
 
 <h3 id="drift">7.4 DRIFT</h3>
-<p>A very slow pitch wobble — a tiny (< 0.4 ms) modulation on a short delay line. Makes the reverb feel alive without being audible as vibrato.</p>
+<p>A very slow pitch wobble — a tiny (&lt; 0.4 ms) modulation on a short delay line. Makes the reverb feel alive without being audible as vibrato.</p>
 <table>
   <tr><th>Control</th><th>Range</th><th>Description</th></tr>
   <tr><td>Feedback</td><td>0 – 85 %</td><td>Delay feedback.</td></tr>
@@ -1070,7 +1077,7 @@ Placing SHIMMER last produces a smooth, top-down wash. Placing it first adds the
 <!-- ============ 10. PRESET LIBRARY ============ -->
 <section id="presets-library">
 <h2>10. Preset Library</h2>
-<p>96 factory presets across 16 categories:</p>
+<p>100 factory presets across 16 categories:</p>
 <table>
   <tr><th>Category</th><th>Engine</th><th>Count</th></tr>
   <tr><td>Ambience</td><td>CloudSeed</td><td>6 + Init</td></tr>
@@ -1100,7 +1107,7 @@ Placing SHIMMER last produces a smooth, top-down wash. Placing it first adds the
 <h3>Parameter names</h3>
 <p>Every parameter is exposed under a stable DAW-visible name. Two entries use descriptive names that reflect what the control actually does:</p>
 <table>
-  <tr><th>Parameter ID</th><th>Display name</th><th>Controls</th></tr>
+  <tr><th>XML name</th><th>DAW-visible name</th><th>Controls</th></tr>
   <tr><td>FfdnDrive</td><td>Saturation</td><td>Amount of Velvet saturation applied inside the FFDN feedback loop.</td></tr>
   <tr><td>FfdnDriveEnabled</td><td>SaturationEnabled</td><td>Enable switch for the saturation stage.</td></tr>
 </table>
@@ -1220,7 +1227,7 @@ you see rendering glitches, try launching the DAW with XWayland:</p>
   <li>Rust 1.98+</li>
   <li>nice-plug 0.4.2 — plugin framework</li>
   <li>egui 0.36 — user interface</li>
-  <li>wide 1.7 — portable SIMD</li>
+  <li>wide 1.6 — portable SIMD</li>
 </ul>
 
 <h3>License</h3>

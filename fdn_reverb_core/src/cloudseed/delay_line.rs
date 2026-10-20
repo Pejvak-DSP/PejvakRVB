@@ -176,8 +176,15 @@ impl DelayLine {
         let n = input.len().min(self.buffer_size);
 
         // Feedback: input + previous block's final (post-EQ) output * feedback gain.
-        for i in 0..n {
-            self.mixed_buffer[i] = input[i] + self.filter_output_buffer[i] * self.feedback;
+        // The `iter_mut()/zip()` form replaces the manual `for i in 0..n`
+        // index loop; the arithmetic is bit-identical and it satisfies
+        // clippy::needless_range_loop.
+        let fb = self.feedback;
+        for (dst, (&inp, &prev)) in self.mixed_buffer[..n]
+            .iter_mut()
+            .zip(input[..n].iter().zip(self.filter_output_buffer[..n].iter()))
+        {
+            *dst = inp + prev * fb;
         }
 
         if self.late_stage_tap {

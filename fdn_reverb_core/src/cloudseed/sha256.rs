@@ -28,14 +28,14 @@ const H0: [u32; 8] = [
 
 #[inline(always)]
 fn rotr(x: u32, n: u32) -> u32 {
-    (x >> n) | (x << (32 - n))
+    x.rotate_right(n)
 }
 
 /// Compresses a single 64-byte message block into `state`.
 fn compress(state: &mut [u32; 8], block: &[u8; 64]) {
     let mut w = [0u32; 64];
-    for (i, chunk) in block.chunks_exact(4).enumerate() {
-        w[i] = u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+    for (i, chunk) in block.as_chunks::<4>().0.iter().enumerate() {
+        w[i] = u32::from_be_bytes(*chunk);
     }
     for i in 16..64 {
         let s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
@@ -119,10 +119,8 @@ pub fn sha256(input: &[u8]) -> [u8; 32] {
     }
     msg.extend_from_slice(&bit_len.to_be_bytes());
 
-    for chunk in msg.chunks_exact(64) {
-        let mut block = [0u8; 64];
-        block.copy_from_slice(chunk);
-        compress(&mut state, &block);
+    for block in msg.as_chunks::<64>().0 {
+        compress(&mut state, block);
     }
 
     finalise(&state)

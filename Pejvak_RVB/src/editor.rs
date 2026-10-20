@@ -287,8 +287,8 @@ const UNDO_SUPPRESS_S: f64 = 0.25;
 /// Captures the current state of every tracked parameter.
 fn capture_undo_snapshot(p: &PejvakRvbParams, preset_name: &str, page: EditorPage) -> UndoSnapshot {
     let mut cloudseed = [0.0f32; 49];
-    for i in 0..49 {
-        cloudseed[i] = p.normalized(i) as f32;
+    for (i, slot) in cloudseed.iter_mut().enumerate() {
+        *slot = p.normalized(i) as f32;
     }
 
     let texture: [f32; 32] = [
@@ -466,8 +466,20 @@ fn apply_undo_snapshot(p: &Arc<PejvakRvbParams>, s: &ParamSetter, snap: &UndoSna
         set_one(p, s, i, snap.cloudseed[i]);
     }
 
-    // Texture: reuse the existing helper, but feed it plain values.
-    apply_texture_params(p, s, &snap.texture, &snap.texture_enabled);
+    // Texture: undo/redo snapshots are always complete, so wrap every
+    // field in `Some(..)` before passing it to the partial helper.
+    // This preserves the "restore the whole state on undo" behaviour
+    // while still using the same partial-application primitive that
+    // the XML loader relies on. Fix for Known Issue #12.
+    let mut tex_opts: [Option<f32>; 32] = [None; 32];
+    for (i, &v) in snap.texture.iter().enumerate() {
+        tex_opts[i] = Some(v);
+    }
+    let mut enabled_opts: [Option<bool>; 6] = [None; 6];
+    for (i, &b) in snap.texture_enabled.iter().enumerate() {
+        enabled_opts[i] = Some(b);
+    }
+    apply_texture_params(p, s, &tex_opts, &enabled_opts);
 
     // Restore *all* FFDN slots, including index 0 (the engine
     // selector). Engine switches never create an undo entry on their
@@ -475,8 +487,8 @@ fn apply_undo_snapshot(p: &Arc<PejvakRvbParams>, s: &ParamSetter, snap: &UndoSna
     // *is* part of the state an undo restores, so that undo lands on
     // the same engine the change was made in.
     let mut ffdn_opts: [Option<f32>; 37] = [None; 37];
-    for i in 0..37 {
-        ffdn_opts[i] = Some(snap.ffdn[i]);
+    for (slot, &v) in ffdn_opts.iter_mut().zip(snap.ffdn.iter()) {
+        *slot = Some(v);
     }
     apply_ffdn_params(p, s, &ffdn_opts);
 
@@ -932,13 +944,8 @@ fn ffdn_param_value(p: &PejvakRvbParams, name: &str) -> f32 {
                 0.0
             }
         }
-        "FfdnDynamicsEnabled" => {
-            if p.ffdn.dynamics_enabled.value() {
-                1.0
-            } else {
-                0.0
-            }
-        }
+        "FfdnDynamicsEnabled" if p.ffdn.dynamics_enabled.value() => 1.0,
+        "FfdnDynamicsEnabled" => 0.0,
         _ => 0.0,
     }
 }
@@ -1058,14 +1065,15 @@ fn params_to_xml(p: &PejvakRvbParams) -> String {
 }
 
 struct ParsedPreset {
-    /// Each CloudSeed slot is optional. Slots that were not present in
-    /// the XML file are `None` and are left untouched by
-    /// `apply_cloudseed_partial`, allowing partial presets (files
-    /// that contain only a subset of the 49 parameters) to be loaded
-    /// non-destructively — same pattern as `ffdn` and `illusion`.
     cloudseed: [Option<f32>; 49],
-    texture: [f32; 32],
-    enabled: [bool; 6],
+    /// Each texture slot is optional. Files without a `<TextureRack>`
+    /// block, or that only specify a subset of the 32 texture
+    /// parameters, leave the missing slots at `None` and
+    /// `apply_texture_params` then preserves the user's current
+    /// values for them. Fix for Known Issue #12.
+    texture: [Option<f32>; 32],
+    /// Same pattern for the 6 per-layer enable switches.
+    enabled: [Option<bool>; 6],
     texture_order: Option<[usize; 6]>,
     eq_enabled: Option<bool>,
     ffdn: [Option<f32>; 37],
@@ -1099,8 +1107,8 @@ fn xml_to_params(path: &Path) -> Option<ParsedPreset> {
     let content = std::fs::read_to_string(path).ok()?;
     let mut data = ParsedPreset {
         cloudseed: [None; 49],
-        texture: [0.0; 32],
-        enabled: [false; 6],
+        texture: [None; 32],
+        enabled: [None; 6],
         texture_order: None,
         eq_enabled: None,
         ffdn: [None; 37],
@@ -1206,9 +1214,9 @@ fn xml_to_params(path: &Path) -> Option<ParsedPreset> {
     // ---- <TextureRack> block ----------------------------------------
     for_each_param(texture_section, |id, v| {
         if let Some(idx) = TEXTURE_PARAM_NAMES.iter().position(|&n| n == id) {
-            data.texture[idx] = v.clamp(0.0, 1.0);
+            data.texture[idx] = Some(v.clamp(0.0, 1.0));
         } else if let Some(idx) = TEXTURE_ENABLED_NAMES.iter().position(|&n| n == id) {
-            data.enabled[idx] = v >= 0.5;
+            data.enabled[idx] = Some(v >= 0.5);
         }
     });
 
@@ -1231,8 +1239,8 @@ fn xml_to_params(path: &Path) -> Option<ParsedPreset> {
         || data.illusion_seen
         || data.eq_enabled.is_some()
         || data.texture_order.is_some()
-        || data.enabled.iter().any(|&b| b)
-        || data.texture.iter().any(|&v| v != 0.0);
+        || data.enabled.iter().any(|x| x.is_some())
+        || data.texture.iter().any(|x| x.is_some());
 
     if any_param_seen {
         Some(data)
@@ -1858,23 +1866,23 @@ fn summarize_diff(a: &UndoSnapshot, b: &UndoSnapshot) -> String {
     }
 
     // FFDN params (skip index 0 — handled above).
-    for i in 1..37 {
+    for (i, &name) in FFDN_PARAM_NAMES.iter().enumerate().skip(1) {
         if (a.ffdn[i] - b.ffdn[i]).abs() > 1.0e-3 {
-            parts.push(FFDN_PARAM_NAMES[i].to_string());
+            parts.push(name.to_string());
         }
     }
 
     // ILLUSION params.
-    for i in 0..8 {
+    for (i, &name) in ILLUSION_PARAM_NAMES.iter().enumerate() {
         if (a.illusion[i] - b.illusion[i]).abs() > 1.0e-3 {
-            parts.push(ILLUSION_PARAM_NAMES[i].to_string());
+            parts.push(name.to_string());
         }
     }
 
     // Texture + Velvet params.
-    for i in 0..32 {
+    for (i, &name) in TEXTURE_PARAM_NAMES.iter().enumerate() {
         if (a.texture[i] - b.texture[i]).abs() > 1.0e-3 {
-            parts.push(TEXTURE_PARAM_NAMES[i].to_string());
+            parts.push(name.to_string());
         }
     }
 
@@ -1961,8 +1969,8 @@ fn history_switch(
 
     // Which half is the pointer over?
     let hover_pos = ui.ctx().pointer_hover_pos();
-    let hover_undo = hover_pos.map_or(false, |p| r_undo.contains(p));
-    let hover_redo = hover_pos.map_or(false, |p| r_redo.contains(p));
+    let hover_undo = hover_pos.is_some_and(|p| r_undo.contains(p));
+    let hover_redo = hover_pos.is_some_and(|p| r_redo.contains(p));
     let show_popups = ui.memory(|m| {
         m.data
             .get_temp::<bool>(egui::Id::new("pejvak_show_popups"))
@@ -2740,7 +2748,7 @@ fn menu_button(ui: &mut Ui, t: &Theme, scale: f32, p: &Arc<PejvakRvbParams>) {
     let safe_zone = popup_rect.union(sub_rect);
 
     let pointer_pos = ui.input(|i| i.pointer.hover_pos());
-    let pointer_in_safe_zone = pointer_pos.map_or(false, |p| safe_zone.contains(p));
+    let pointer_in_safe_zone = pointer_pos.is_some_and(|p| safe_zone.contains(p));
 
     // Hovering any non-Size row immediately closes the flyout. Without
     // this guard, the safe zone (popup ∪ submenu) would keep the
@@ -3008,7 +3016,7 @@ impl NiceEguiApp for PejvakEguiApp {
         let has_change = self
             .last_snapshot
             .as_ref()
-            .map_or(false, |prev| snapshots_differ(prev, &current, 1.0e-4));
+            .is_some_and(|prev| snapshots_differ(prev, &current, 1.0e-4));
 
         let history_grace = (now - self.last_history_apply) < 0.8;
         let should_absorb = !has_change || (history_grace && !user_active);
@@ -3445,9 +3453,7 @@ impl PejvakEguiApp {
     /// stored in the target snapshot so the caller can restore the
     /// label in the preset browser along with the values.
     fn do_undo(&mut self, setter: &ParamSetter, now: f64) -> Option<(String, EditorPage)> {
-        let Some(target) = self.undo_stack.pop_back() else {
-            return None;
-        };
+        let target = self.undo_stack.pop_back()?;
 
         let target_name = target.preset_name.clone();
         let target_page = target.page;
@@ -3467,9 +3473,7 @@ impl PejvakEguiApp {
     /// Applies the top of the redo stack. Returns the preset name
     /// stored in the target snapshot (see `do_undo`).
     fn do_redo(&mut self, setter: &ParamSetter, now: f64) -> Option<(String, EditorPage)> {
-        let Some(target) = self.redo_stack.pop() else {
-            return None;
-        };
+        let target = self.redo_stack.pop()?;
 
         let target_name = target.preset_name.clone();
         let target_page = target.page;
@@ -6845,27 +6849,48 @@ fn apply_preset(p: &Arc<PejvakRvbParams>, s: &ParamSetter, values: &[f32; 49]) {
     }
 }
 
+/// Applies the Texture Rack parameters parsed from an XML preset.
+///
+/// Only the slots that are `Some` in `texture` / `enabled` are pushed
+/// to the host. This makes loading a **partial** preset safe: if the
+/// XML did not contain a `<TextureRack>` block, or only specified a
+/// subset of the 32 texture parameters, the user's current values for
+/// the missing slots are preserved instead of being silently
+/// overwritten by defaults.
+///
+/// This is the same pattern already used by `apply_cloudseed_partial`,
+/// `apply_ffdn_params`, and `apply_illusion_params`. Fix for Known
+/// Issue #12.
+///
+/// `undo`/`redo` use the same function by wrapping their (always
+/// complete) snapshot arrays in `Some(..)` before calling it — see
+/// `apply_undo_snapshot`.
 fn apply_texture_params(
     p: &Arc<PejvakRvbParams>,
     s: &ParamSetter,
-    texture: &[f32; 32],
-    enabled: &[bool; 6],
+    texture: &[Option<f32>; 32],
+    enabled: &[Option<bool>; 6],
 ) {
     macro_rules! set_b {
         ($param:expr, $val:expr) => {{
-            s.begin_set_parameter(&$param);
-            s.set_parameter(&$param, $val);
-            s.end_set_parameter(&$param);
+            if let Some(v) = $val {
+                s.begin_set_parameter(&$param);
+                s.set_parameter(&$param, v);
+                s.end_set_parameter(&$param);
+            }
         }};
     }
     macro_rules! set_f {
         ($param:expr, $val:expr) => {{
-            s.begin_set_parameter(&$param);
-            s.set_parameter_normalized(&$param, ($val as f32).clamp(0.0, 1.0));
-            s.end_set_parameter(&$param);
+            if let Some(v) = $val {
+                s.begin_set_parameter(&$param);
+                s.set_parameter_normalized(&$param, v.clamp(0.0, 1.0));
+                s.end_set_parameter(&$param);
+            }
         }};
     }
 
+    // ---- Enable switches --------------------------------------------
     set_b!(p.shimmer.enabled, enabled[0]);
     set_b!(p.mist.enabled, enabled[1]);
     set_b!(p.drift.enabled, enabled[2]);
@@ -6873,41 +6898,48 @@ fn apply_texture_params(
     set_b!(p.scatter.enabled, enabled[4]);
     set_b!(p.bloom.enabled, enabled[5]);
 
+    // ---- Shimmer (5) ------------------------------------------------
     set_f!(p.shimmer.mix, texture[0]);
     set_f!(p.shimmer.pitch, texture[1]);
     set_f!(p.shimmer.feedback, texture[2]);
     set_f!(p.shimmer.low_cut, texture[3]);
     set_f!(p.shimmer.high_cut, texture[4]);
 
+    // ---- Mist (5) ---------------------------------------------------
     set_f!(p.mist.mix, texture[5]);
     set_f!(p.mist.hp, texture[6]);
     set_f!(p.mist.feedback, texture[7]);
     set_f!(p.mist.delay, texture[8]);
     set_f!(p.mist.rate, texture[9]);
 
+    // ---- Drift (5) --------------------------------------------------
     set_f!(p.drift.mix, texture[10]);
     set_f!(p.drift.feedback, texture[11]);
     set_f!(p.drift.delay, texture[12]);
     set_f!(p.drift.rate, texture[13]);
     set_f!(p.drift.depth, texture[14]);
 
+    // ---- Crystal (4) ------------------------------------------------
     set_f!(p.crystal.mix, texture[15]);
     set_f!(p.crystal.size, texture[16]);
     set_f!(p.crystal.density, texture[17]);
     set_f!(p.crystal.feedback, texture[18]);
 
+    // ---- Scatter (5) ------------------------------------------------
     set_f!(p.scatter.mix, texture[19]);
     set_f!(p.scatter.spread, texture[20]);
     set_f!(p.scatter.density, texture[21]);
     set_f!(p.scatter.speed, texture[22]);
     set_f!(p.scatter.feedback, texture[23]);
 
+    // ---- Bloom (5) --------------------------------------------------
     set_f!(p.bloom.mix, texture[24]);
     set_f!(p.bloom.rise, texture[25]);
     set_f!(p.bloom.size, texture[26]);
     set_f!(p.bloom.feedback, texture[27]);
     set_f!(p.bloom.tone, texture[28]);
 
+    // ---- Velvet Noise (3) -------------------------------------------
     set_f!(p.velvet.diffusion, texture[29]);
     set_f!(p.velvet.density, texture[30]);
     set_f!(p.velvet.tone, texture[31]);
@@ -7303,6 +7335,7 @@ fn knob_row_compact(ui: &mut Ui, scale: f32, count: usize, add: impl FnOnce(&mut
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn knob_compact<P: Param>(
     ui: &mut Ui,
     t: &Theme,
@@ -7364,6 +7397,7 @@ fn knob_compact<P: Param>(
 /// The left segment corresponds to `param < 0.5`, the right segment
 /// to `param >= 0.5`. Use with `FloatParam`s that have a step size
 /// of 1.0 to get a two-position switch.
+#[allow(clippy::too_many_arguments)]
 fn horizontal_switch_2<P: Param>(
     ui: &mut Ui,
     t: &Theme,
@@ -7494,6 +7528,7 @@ fn numbox_row<P: Param>(
 /// `items` is a slice of `(column_index, label, param)` tuples.
 /// The slice MUST be sorted by `column_index` ascending, and
 /// `column_index` values must be < `num_columns`.
+#[allow(clippy::too_many_arguments)]
 fn switch_row_at_columns<P: Param>(
     ui: &mut Ui,
     scale: f32,
@@ -7745,6 +7780,7 @@ fn switch_tiny<P: Param>(
 // Widgets
 // ============================================================================
 
+#[allow(clippy::too_many_arguments)]
 fn knob<P: Param>(
     ui: &mut Ui,
     t: &Theme,
@@ -7800,6 +7836,7 @@ fn knob<P: Param>(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fader<P: Param>(
     ui: &mut Ui,
     t: &Theme,
@@ -7855,6 +7892,7 @@ fn fader<P: Param>(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn numbox<P: Param>(
     ui: &mut Ui,
     t: &Theme,
@@ -8667,6 +8705,7 @@ fn section_title(ui: &mut Ui, t: &Theme, text: &str, accent: Color32, scale: f32
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn section_title_with_switch<P: Param>(
     ui: &mut Ui,
     t: &Theme,
@@ -9148,7 +9187,7 @@ fn draw_modal_panel(ui: &mut Ui, t: &Theme, scale: f32) {
         && ui.input(|i| i.pointer.any_click())
         && ui
             .input(|i| i.pointer.interact_pos())
-            .map_or(false, |pos| !modal_rect.contains(pos));
+            .is_some_and(|pos| !modal_rect.contains(pos));
 
     if close_clicked || backdrop_clicked || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         // Start the close animation instead of removing immediately.

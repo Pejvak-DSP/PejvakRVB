@@ -78,6 +78,14 @@ cargo nice-plug bundle Pejvak_RVB --release
 cargo test -p fdn_reverb_core
 ```
 
+### Linting the whole workspace
+
+```bash
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+`--all-targets` is essential: without it, test code is not linted, and violations there go unnoticed until CI catches them. `--workspace` ensures both `fdn_reverb_core` and `Pejvak_RVB` are checked.
+
 ---
 
 ## Strict Code Rules (Audio Thread Safety)
@@ -102,7 +110,7 @@ Audio programming is highly sensitive. A single allocation on the audio thread o
 
 - Never use `Mutex`, `RwLock`, or any thread-blocking operation inside `process()`.
 - Use atomics (`AtomicBool`, `AtomicU64`) or lock-free structures for communication between the UI and the audio thread.
-- When interacting with `egui` memory, avoid nested locks (e.g. calling `ui.ctx().input()` inside `ui.memory_mut()`), as this can deadlock. This is explicitly required by the TX kill switch (`pejvak_tx_kill_active` and `pejvak_force_undo_commit_at`).
+- On the UI side, when interacting with `egui` memory, avoid nested locks (e.g. calling `ui.ctx().input()` inside `ui.memory_mut()`), as this can deadlock. This is explicitly required by the TX kill switch (`pejvak_tx_kill_active` and `pejvak_force_undo_commit_at`).
 
 ### 4. Prevent Denormals
 
@@ -149,12 +157,12 @@ Every output-stage gain is smoothed per sample inside the DSP, with a **10 ms on
 
 - Smoothed fields are initialized to `f64::NAN`.
 - At the top of `process()` (and at the top of the output stage in `ReverbController`), each smoothed field is checked: **if it is `NaN`, it snaps directly to its target** — no ramp.
-- `clear_buffers()` resets the smoothed fields back to `NaN`. Preset loads and sleep entry both call `clear_buffers()`, so those transitions take effect instantly. Undo/redo does **not** call `clear_buffers()` (see the undo section), so undo/redo gets a ~10 ms ramp — which is the correct behaviour for a parameter edit.
+- `clear_buffers()` resets the smoothed fields back to `NaN`. Preset loads and sleep entry both call `clear_buffers()`, so those transitions take effect instantly. Undo/redo does **not** call `clear_buffers()` (see the undo section), so undo/redo gets a ~10 ms ramp — which is the correct behavior for a parameter edit.
 
-#### Output helpers (renamed)
+#### Output helpers
 
-- `apply_width_and_write` was replaced by **`apply_output_with_width`** (takes a `widths: &[f64]` slice of per-sample values).
-- `apply_width_and_write_with_dry` was replaced by **`apply_output_with_dry_and_width`** (takes both `dry_gains: &[f64]` and `widths: &[f64]`).
+- `apply_output_with_width` takes a `widths: &[f64]` slice of per-sample values. It replaced the old `apply_width_and_write`.
+- `apply_output_with_dry_and_width` takes both `dry_gains: &[f64]` and `widths: &[f64]`. It replaced the old `apply_width_and_write_with_dry`.
 - Both are **static** functions (not methods), because the caller has destructured `self` into disjoint field borrows.
 
 #### Rules for new gains
@@ -170,14 +178,15 @@ Any new gain that multiplies the signal inside `process()` (or inside the FFDN /
 
 If the gain is a raw `mul` on the output without a `smoothed_*` counterpart, the fader will zipper on manual drag.
 
-### CloudSeed `apply_undo_snapshot`: Do **Not** Reset the DSP
+### `apply_undo_snapshot`: Do **Not** Reset the DSP
 
 - `apply_undo_snapshot` in `editor.rs` must **never** set `reset_requested`. Undo/redo is a context switch between parameter states, not a preset load. Clearing the reverb tail on every undo is jarring and incorrect.
 - The comment in the function explains this. If you find a reason to change it, open a discussion first.
+- The function calls `apply_texture_params` with the snapshot's complete arrays wrapped in `Some(..)`. This intentionally reuses the same partial-application primitive that the XML loader uses, so there is exactly **one** texture-apply path in the codebase. Do not introduce a second full-array apply just for undo — that duplication is what caused texture state to drift between the two paths in an earlier version.
 
 ### FFDN Delay Buffer Sizing
 
-- `SingleNetwork::new` computes `max_delay_samples = ceil(sample_rate × 0.5)`, i.e. a **500 ms** buffer at any sample rate. It used to be a hard-coded `24000`, which capped the usable Size range at 96 kHz.
+- `SingleNetwork::new` computes `max_delay_samples = ceil(sample_rate × 0.5)`, i.e. a **500 ms** buffer at any sample rate. It used to be a hard-coded `24000`, which capped the usable Size range at 250 ms at 96 kHz.
 - `recompute_delays` **must** clamp the computed delay to `self.lines[i].max_delay_samples()` **before** storing it in `delays_samples`. `recompute_feedback` reads its delay time from `delays_samples`; if that value exceeds the buffer capacity, the audible decay becomes shorter than requested.
 
 ### Velvet-Noise Filter: Rate-Aware Construction
@@ -208,9 +217,23 @@ These stages were specifically tuned so the user can actually hear them (previou
 
 ### Partial XML Presets
 
-- `ParsedPreset.cloudseed` is `[Option<f32>; 49]`, **not** `[f32; 49]`. `cs_seen` was removed.
-- `xml_to_params` accepts a file if `any_param_seen` is true (at least one CloudSeed, FFDN, Illusion, EQ, Texture, or Order value was present). A completely empty `<CloudReverb></CloudReverb>` is still rejected.
-- Loading a preset from a file must use `apply_cloudseed_partial` (which skips `None` slots), **not** `apply_preset` (which writes all 49). `apply_preset` is still used for factory presets, which are always complete.
+- `ParsedPreset` has four independently-optional parameter blocks:
+  - `cloudseed: [Option<f32>; 49]`
+  - `texture: [Option<f32>; 32]`
+  - `enabled: [Option<bool>; 6]`
+  - `ffdn: [Option<f32>; 37]`
+
+  plus `illusion_seen: bool`, which gates the 8-value ILLUSION block.
+- `cs_seen` was removed: `any_param_seen` is now derived from the `Option` arrays themselves. A completely empty `<CloudReverb></CloudReverb>` is still rejected.
+- Loading a preset from a file must use the **partial** apply functions:
+  - `apply_cloudseed_partial(p, s, &cloudseed)`
+  - `apply_texture_params(p, s, &texture, &enabled)`
+  - `apply_ffdn_params(p, s, &ffdn)`
+  - `apply_illusion_params(p, s, ..., illusion_seen)`
+
+  `apply_preset` is still used for **factory** presets, which are always complete.
+- **Do not** call `apply_texture_params` with an all-zero `[f32; 32]` when a `<TextureRack>` block was absent. This was the source of a historical bug: a file with only `<FFDN>` would silently reset every texture parameter and disable every layer. The partial signature (`[Option<f32>; 32]`, `[Option<bool>; 6]`) makes this mistake impossible at the type level.
+- The **expected** behavior for a partial file is: unspecified slots are left untouched, specified slots are overwritten. This applies per parameter, not per section: a `<TextureRack>` block that only contains 5 of the 32 parameters must not reset the other 27.
 
 ### ILLUSION (formerly CHIME)
 
@@ -221,14 +244,27 @@ These stages were specifically tuned so the user can actually hear them (previou
 
 - Every layer uses `clear_buffers()` on a rising edge (`mix: 0 → >0`), **not** `reset_runtime_state()`. `reset_runtime_state` would leave stale audio in the internal buffers, which produces an audible click when the layer re-enables after a long bypass (e.g. TX kill).
 
+### `MatrixKind` Stays Inline
+
+- `MatrixKind` is an inline enum (`Householder(HouseholderMatrix)` / `Velvet(VelvetMatrix)`), **not** `Box<dyn FeedbackMatrix>` and **not** `Box<VelvetMatrix>`. Clippy's `large_enum_variant` lint fires on this enum because `VelvetMatrix` is ~400 bytes; the lint is explicitly allowed with `#[allow(clippy::large_enum_variant)]`.
+- The rationale: `rebuild_matrix` runs on the audio thread whenever the user moves the `FfdnMatrix` or `FfdnLines` knob. The inline enum makes that assignment a stack memcpy. Boxing the variant would introduce a heap allocation there and break RT-safety.
+- Do **not** "fix" this lint by boxing. If a future refactor genuinely needs heap indirection (e.g. adding a third matrix type that is much larger), the allocation must be moved out of `rebuild_matrix` first.
+
+### DSP Loops: Iterators Over Index Loops
+
+- Clippy enforces `needless_range_loop` under `-D warnings`. In DSP hot paths, prefer iterators (`iter_mut().zip()`, `iter().take(n).enumerate()`) over manual `for i in 0..n { arr[i] ... }` loops where the code is still clear.
+- Iterator chains such as `zip` typically let the compiler elide bounds checks in release builds, so this is a readability change with bit-identical output.
+- In test code (`#[cfg(test)]`), `#[allow(clippy::needless_range_loop)]` on the individual test function is preferred over refactoring the test into iterator style — matrix-construction tests are clearer with `a[row][col]` indexing.
+
 ---
 
 ## Code Style
 
 We enforce strict code quality to keep the project maintainable:
 
-- **Format:** Run `cargo fmt` before committing.
-- **Lints:** Run `cargo clippy -- -D warnings` and fix all warnings.
+- **Format:** Run `cargo fmt --all` before committing.
+- **Lints:** Run `cargo clippy --workspace --all-targets -- -D warnings` and fix all warnings. The `--workspace` and `--all-targets` flags are mandatory: the first checks both crates, the second also checks test code. Omitting either can hide a regression.
+- **Lint exceptions:** Lints that would conflict with a hard project rule (e.g. `large_enum_variant` on `MatrixKind`, `too_many_arguments` on the eight-argument knob/fader/numbox helpers) are allowed at the specific site with a comment explaining the reason. Do not disable a lint crate-wide.
 - **Comments:** Keep comments concise (1–3 lines). Avoid excessive or dead comments. Never mention plugin version numbers inside code comments.
 - **Naming:** Follow standard Rust naming conventions.
 - **Param IDs vs. XML names:** For FFDN, `Saturation` / `SaturationEnabled` (param IDs in Rust) deliberately differ from `FfdnDrive` / `FfdnDriveEnabled` (XML names). **Do not** change either side; both are part of the automation and preset ABI.
@@ -246,7 +282,7 @@ We enforce strict code quality to keep the project maintainable:
 
 2. Write your code, following the real-time and DSP-specific rules above.
 3. **Add tests.** If you modify DSP logic, add unit tests in the `#[cfg(test)]` module. Any change to `density`, `decorr`, `attack`, `ducking`, `gate`, `loop_hp`, `loop_lp`, `mid_focus`, `drive`, or `velvet_saturate` must ship with a `*_is_bit_identical` or `*_keeps_network_stable` test.
-4. Run `cargo fmt` and `cargo clippy -- -D warnings`.
+4. Run `cargo fmt --all` and `cargo clippy --workspace --all-targets -- -D warnings`.
 5. Run the full test suite:
 
    ```bash
@@ -272,27 +308,31 @@ We enforce strict code quality to keep the project maintainable:
 
 Before opening a PR, please verify:
 
-- [ ] `cargo test -p fdn_reverb_core` passes.
+- [ ] `cargo test -p fdn_reverb_core` passes (all `*_is_bit_identical` tests included).
 - [ ] `cargo build -p Pejvak_RVB --release` succeeds.
-- [ ] `cargo clippy -- -D warnings` produces no warnings.
+- [ ] `cargo clippy --workspace --all-targets -- -D warnings` produces no warnings.
 - [ ] If you touched any DSP code: an `*_is_bit_identical` test proves that the neutral/default value is unchanged.
 - [ ] If you changed any parameter's default value: XML presets still round-trip correctly (save → load → compare).
 - [ ] If you touched the FFDN: `drive_one_keeps_network_stable` and `dynamics_keep_network_stable` still pass.
 - [ ] If you touched the `apply_factory_preset` path: every existing factory preset still sounds identical (or the change was approved by a maintainer).
-- [ ] If you touched `ParsedPreset` or `xml_to_params`: both a full XML and a partial XML load correctly.
-- [ ] **If you added or changed an output-stage gain**: it has a `smoothed_*` field, is reset to `NaN` in `clear_buffers()`, and is advanced per sample inside `process()`.
-- [ ] **Manual fader drag test**: dragging the affected fader produces no zipper noise (use a sustained reverb tail).
-- [ ] **Preset load test**: after loading a preset, the smoothed gains snap instantly (no 10 ms glide).
+- [ ] If you touched `ParsedPreset`, `xml_to_params`, or any `apply_*_params` function: all five XML shapes below load correctly.
+  - Full XML (all sections present)
+  - CloudSeed-only XML (no `<FFDN>`, no `<Illusion>`, no `<TextureRack>`)
+  - FFDN-only XML (no CloudSeed params, no `<TextureRack>`)
+  - Illusion-only XML (no other sections)
+  - Incomplete `<TextureRack>` XML (only a subset of the 32 texture parameters)
+
+  In every partial case, the **unspecified** parameters must be **preserved** (not reset to 0/false).
+- [ ] If you added or changed an output-stage gain: it has a `smoothed_*` field, is reset to `NaN` in `clear_buffers()`, and is advanced per sample inside `process()`.
+- [ ] **Manual fader drag test:** dragging the affected fader produces no zipper noise (use a sustained reverb tail).
+- [ ] **Preset load test:** after loading a preset, the smoothed gains snap instantly (no 10 ms glide).
+- [ ] **Undo/redo test:** pressing Undo immediately after a manual fader drag restores the previous value with a ~10 ms ramp, **without** cutting the reverb tail.
 
 ---
 
 ## Known Issues
 
 These are documented so contributors don't spend time "fixing" the same issue twice.
-
-### `apply_texture_params` is unconditional on preset load
-
-When loading a user XML that does not contain a `<TextureRack>` block, `apply_texture_params` still runs. `parsed.texture` is filled with zeros and `parsed.enabled` is all `false`, so every texture parameter is reset to 0 and every layer is disabled. This is a known limitation. A proper fix would make `ParsedPreset.texture` a `[Option<f32>; 32]` and mirror the `apply_cloudseed_partial` pattern.
 
 ### Logo quality in the About modal
 

@@ -11,16 +11,14 @@
 //!
 //! The classical choices are:
 //!
-//!   * **Hadamard**     — requires N to be a power of two; highly
-//!                        structured, so the echo pattern can have
-//!                        audible periodicities.
-//!   * **Random**       — perfect mixing, but N² multiplies per
-//!                        sample. For N=16 that's 256 ops/sample.
-//!   * **Householder**  — reflections through a hyperplane; lossless,
-//!                        mixes well, and reduces to **2N** ops per
-//!                        sample by exploiting the structure of the
-//!                        reflection formula. For N=16 that's 32
-//!                        ops/sample.
+//! * **Hadamard** — requires N to be a power of two; highly
+//!   structured, so the echo pattern can have audible periodicities.
+//! * **Random** — perfect mixing, but N² multiplies per sample.
+//!   For N=16 that's 256 ops/sample.
+//! * **Householder** — reflections through a hyperplane; lossless,
+//!   mixes well, and reduces to **2N** ops per sample by
+//!   exploiting the structure of the reflection formula. For N=16
+//!   that's 32 ops/sample.
 //!
 //! Householder wins on the cost/quality curve, so it's our default.
 
@@ -49,15 +47,15 @@ pub struct HouseholderMatrix {
 impl HouseholderMatrix {
     pub fn new(n: usize, seed: u64) -> Self {
         debug_assert!(n <= MAX_LINES, "HouseholderMatrix size > MAX_LINES");
-        let n = n.min(MAX_LINES).max(1);
+        let n = n.clamp(1, MAX_LINES);
         let mut state = seed | 1;
         let mut signs = [0.0; MAX_LINES];
-        for i in 0..n {
+        for slot in signs.iter_mut().take(n) {
             // xorshift64 — fast, deterministic, no external crate.
             state ^= state << 13;
             state ^= state >> 7;
             state ^= state << 17;
-            signs[i] = if (state & 1) == 0 { 1.0 } else { -1.0 };
+            *slot = if (state & 1) == 0 { 1.0 } else { -1.0 };
         }
         Self {
             signs,
@@ -80,8 +78,8 @@ impl FeedbackMatrix for HouseholderMatrix {
 
         // Pass 1: compute the dot product of `signs` with `x`.
         let mut dot = 0.0;
-        for i in 0..n {
-            dot += self.signs[i] * x[i];
+        for (s, xv) in self.signs[..n].iter().zip(x[..n].iter()) {
+            dot += s * xv;
         }
         let scale = -2.0 * dot * self.inv_n;
 
@@ -100,6 +98,7 @@ mod tests {
     /// `AᵀA = I` numerically. This is the property that guarantees
     /// feedback stability.
     #[test]
+    #[allow(clippy::needless_range_loop)]
     fn householder_is_orthogonal() {
         let n = 8;
         let mut m = HouseholderMatrix::new(n, 0xDEAD_BEEF);

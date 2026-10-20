@@ -34,7 +34,7 @@ pub fn generate_into(seed: i64, count: usize, out: &mut [f64]) {
         block.copy_from_slice(&digest[..8]);
     }
 
-    for i in 0..count {
+    for (i, slot) in out.iter_mut().take(count).enumerate() {
         let base = i * 4;
         let val = u32::from_le_bytes([
             bytes[base],
@@ -42,7 +42,7 @@ pub fn generate_into(seed: i64, count: usize, out: &mut [f64]) {
             bytes[base + 2],
             bytes[base + 3],
         ]);
-        out[i] = val as f64 / u32::MAX as f64;
+        *slot = val as f64 / u32::MAX as f64;
     }
 }
 

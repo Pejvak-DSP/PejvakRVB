@@ -552,8 +552,11 @@ impl ReverbChannel {
                     self.temp_buffer[..n].copy_from_slice(&out[..n]);
                 } else {
                     let out = self.lines[i].get_output();
-                    for j in 0..n {
-                        self.temp_buffer[j] += out[j];
+                    for (dst, src) in self.temp_buffer[..n]
+                        .iter_mut()
+                        .zip(out[..n].iter())
+                    {
+                        *dst += *src;
                     }
                 }
             }

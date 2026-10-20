@@ -1416,10 +1416,17 @@ impl ReverbController {
 
         match self.engine {
             ReverbEngine::CloudSeed => {
-                for i in 0..n {
-                    let m = mono[i] as f64;
-                    self.left_channel_in[i] = m;
-                    self.right_channel_in[i] = m;
+                // Fan the mono input out into both channel input buffers.
+                // Using iterators avoids the `needless_range_loop` lint
+                // while keeping the arithmetic identical.
+                for ((dst_l, dst_r), &s) in self.left_channel_in[..n]
+                    .iter_mut()
+                    .zip(self.right_channel_in[..n].iter_mut())
+                    .zip(mono[..n].iter())
+                {
+                    let m = s as f64;
+                    *dst_l = m;
+                    *dst_r = m;
                 }
 
                 self.channel_l.process(&self.left_channel_in[..n]);
@@ -1428,8 +1435,11 @@ impl ReverbController {
                 let ol = self.channel_l.get_output();
                 let or_ = self.channel_r.get_output();
 
-                for i in 0..n {
-                    mono[i] = ((ol[i] + or_[i]) * 0.5) as f32;
+                for (out, (&a, &b)) in mono[..n]
+                    .iter_mut()
+                    .zip(ol[..n].iter().zip(or_[..n].iter()))
+                {
+                    *out = ((a + b) * 0.5) as f32;
                 }
             }
             ReverbEngine::Ffdn => {
@@ -1447,8 +1457,11 @@ impl ReverbController {
                 // Sum the stereo output back to mono. The factor of
                 // 0.5 matches the CloudSeed branch and keeps the
                 // perceived level identical between engines.
-                for i in 0..n {
-                    mono[i] = (buf_l[i] + buf_r[i]) * 0.5;
+                for (out, (&a, &b)) in mono[..n]
+                    .iter_mut()
+                    .zip(buf_l[..n].iter().zip(buf_r[..n].iter()))
+                {
+                    *out = (a + b) * 0.5;
                 }
 
                 self.mono_stereo_l = buf_l;

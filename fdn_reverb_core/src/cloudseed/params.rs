@@ -140,7 +140,7 @@ impl Parameter {
     pub fn from_name(name: &str) -> Option<Parameter> {
         (0..PARAM_COUNT)
             .find(|i| {
-                Parameter::from_index(*i).map_or(false, |p| p.name().eq_ignore_ascii_case(name))
+                Parameter::from_index(*i).is_some_and(|p| p.name().eq_ignore_ascii_case(name))
             })
             .and_then(Parameter::from_index)
     }

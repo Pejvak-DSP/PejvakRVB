@@ -48,10 +48,18 @@ pub use velvet_matrix::VelvetMatrix;
 
 /// Inline storage for the two feedback matrix types. Replaces the
 /// previous `Box<dyn FeedbackMatrix>` so that `rebuild_matrix` never
-/// allocates on the audio thread: both variants are Copy-able structs
+/// allocates on the audio thread: both variants are fixed-size structs
 /// of bounded size (`VelvetMatrix` is the larger at 3 × 16 × 8 bytes
-/// = 384 bytes plus a tag), so assigning a new value is a stack
-/// memcpy — no heap, no `Box::new`.
+/// plus a tag), so assigning a new value is a stack memcpy — no heap,
+/// no `Box::new`.
+///
+/// The `large_enum_variant` lint is explicitly allowed here: the
+/// entire point of the inline storage is to avoid the heap allocation
+/// that `Box` would introduce. Boxing `VelvetMatrix` to satisfy the
+/// lint would re-introduce an allocation on the audio thread in
+/// `rebuild_matrix`, which would break the RT-safety guarantee
+/// documented in `repomix-instruction.md` §22–§23.
+#[allow(clippy::large_enum_variant)]
 pub enum MatrixKind {
     Householder(HouseholderMatrix),
     Velvet(VelvetMatrix),
@@ -902,8 +910,8 @@ impl FfdnCore {
     /// Selects the feedback matrix type.
     ///
     /// * `false` → dense Householder (smooth, "algorithmic" tail)
-    /// * `true`  → sparse Velvet (blocked + permutation, more
-    ///              "physical" echo pattern)
+    /// * `true` → sparse Velvet (blocked + permutation, more
+    ///   "physical" echo pattern)
     ///
     /// Rebuilds the matrix on both networks; the switch is cheap
     /// (two small Vec allocations), but it should still be called
@@ -1273,7 +1281,7 @@ impl SingleNetwork {
         // active count reuses pre-set values without recomputation.
         let mut state = seed | 1;
         let mut mod_rate_multipliers = Vec::with_capacity(MAX_LINES);
-        for i in 0..MAX_LINES {
+        for line in lines.iter_mut().take(MAX_LINES) {
             state ^= state << 13;
             state ^= state >> 7;
             state ^= state << 17;
@@ -1284,7 +1292,7 @@ impl SingleNetwork {
             state ^= state >> 7;
             state ^= state << 17;
             let u_phase = ((state >> 11) as f64) / ((1u64 << 53) as f64);
-            lines[i].set_lfo_phase(u_phase);
+            line.set_lfo_phase(u_phase);
         }
 
         Self {

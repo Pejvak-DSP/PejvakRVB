@@ -5,6 +5,8 @@ All notable changes to PEJVAK RVB are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Released]
+
 ## [1.0.1] - 2026-10-20
 
 ### Fixed
@@ -80,13 +82,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   complete, canonical state independent of what the user was doing
   before.
 
-- **Partial XML preset support** — `ParsedPreset.cloudseed` is now
-  `[Option<f32>; 49]`. `xml_to_params` no longer requires all 49
+- **Partial XML preset support — CloudSeed** — `ParsedPreset.cloudseed`
+  is now `[Option<f32>; 49]`. `xml_to_params` no longer requires all 49
   CloudSeed parameters to be present; a file with only FFDN, only
   Illusion, or a subset of CloudSeed loads non-destructively. A
   completely empty `<CloudReverb></CloudReverb>` is still rejected by
   the `any_param_seen` check. Loading from a file uses
   `apply_cloudseed_partial`, not `apply_preset`.
+
+- **Partial XML preset support — Texture Rack (Known Issue #12)** —
+  `ParsedPreset.texture` is now `[Option<f32>; 32]` and
+  `ParsedPreset.enabled` is `[Option<bool>; 6]`. `apply_texture_params`
+  is now a **partial** apply function (same pattern as
+  `apply_cloudseed_partial`, `apply_ffdn_params`, and
+  `apply_illusion_params`). Previously, loading a user XML that did
+  not contain a `<TextureRack>` block would silently reset every
+  texture parameter to 0 and disable every layer, because
+  `apply_texture_params` was called unconditionally with all-zero
+  arrays. Partial and full XML presets now load non-destructively:
+  unspecified texture slots are left untouched, specified slots are
+  overwritten. `apply_undo_snapshot` wraps its complete snapshot
+  arrays in `Some(..)` and reuses the same partial apply function, so
+  there is exactly one texture-apply code path in the codebase.
 
 - **CI race condition** — the three per-platform workflows
   (`build-windows.yml`, `build-macos.yml`, `build-linux.yml`) were
@@ -109,10 +126,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (or reloading a host project) shows the correct preset label instead
   of always reverting to `Init`.
 
+- **Clippy `-D warnings` clean** — all 26 production lints and all 23
+  UI/test lints are now resolved. `cargo clippy --workspace
+  --all-targets -- -D warnings` completes with zero warnings. The
+  fixes are purely idiomatic (iterator loops instead of `for i in
+  0..n`, `is_some_and` instead of `map_or(false, …)`, `clamp` instead
+  of `.min().max()`, `rotate_right` instead of a manual bit rotation,
+  `as_chunks::<N>()` instead of `chunks_exact(N)` for constant chunk
+  sizes, `?` operator instead of `let Some(..) = … else { return
+  None; }`). The output is bit-identical — verified by the 33-test
+  `cargo test -p fdn_reverb_core` suite, including every
+  `*_is_bit_identical` test. One lint (`large_enum_variant` on
+  `MatrixKind`) is explicitly allowed at the enum's definition site,
+  because boxing the `VelvetMatrix` variant would re-introduce a heap
+  allocation on the audio thread in `rebuild_matrix`, violating the
+  project's real-time safety guarantees.
+
+- **Redundant permutation loop removed in `velvet_matrix.rs`** —
+  `VelvetMatrix::apply` no longer runs the permutation twice. The
+  previous code had two identical `for` loops writing the same values
+  into `y`; only the `zip`-based version remains. The output was
+  already bit-identical (the second loop overwrote the first with the
+  same values), so this is a code-clarity change, not a behavioral
+  one.
+
+- **CI workflow unified** — see the *CI race condition* entry under
+  *Fixed*. The three per-platform workflow files no longer exist.
+
 - **About modal text** — now says "100 factory presets" and "wide 1.6"
   (both were stale).
 
-- **Header order** — the actual left-to-right order is:
+- **Header order documented** — the actual left-to-right order is:
   `MAIN|TEXTURE → TX → CLOUD|FFDN → Bypass/Freeze/Interp →
   Undo/Redo → Preset → ☰ → ☀/☾`.
 
@@ -121,7 +165,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and added them to `.gitignore`. These are AI-context files that are
   regenerable and should not be tracked in version control.
 
+- **`CONTRIBUTING.md` refresh** — documented the `MatrixKind`
+  inline-storage rule (why clippy's `large_enum_variant` suggestion is
+  rejected), the iterator-vs-index-loop convention for DSP hot paths,
+  and the partial-texture-XML contract in the PR checklist. Removed
+  the Known Issue #12 entry now that it is fixed.
+
 ### Notes
+
+- **Full DSP bit-exactness verified** — `cargo test -p
+  fdn_reverb_core` now runs 33 tests, all passing. This includes every
+  `*_is_bit_identical` test (`density`, `decorr`, `attack`, `ducking`,
+  `gate`, `mid_focus`, `loop_filters`), every `*_keeps_network_stable`
+  test (`drive_one`, `dynamics`, `loop_filters`, `changing_line_count`),
+  every matrix orthogonality and energy-preservation test, every
+  SHA-256 / `ShaRandom` reference test, and every Velvet-Noise
+  convolution and density test. The suite was run after every change
+  in the clippy cleanup and confirms that no DSP behavior was altered.
 
 - **Logo quality in the About modal** — `manual/logo.png` is currently
   low-resolution (~150×200 px) and is upscaled to `64.0 × scale`
@@ -140,6 +200,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release.
 
+### Added
+
 - CloudSeed legacy-v1 port (49 parameters, pure `f64`).
 - FFDN engine with Householder and Velvet matrices.
 - ILLUSION granular cloud with pitched overtones.
@@ -148,3 +210,7 @@ Initial public release.
 - 100 factory presets across 16 categories.
 - Undo/Redo with engine and page restore.
 - TX kill switch, Smart Idle, Smart Sleep.
+
+[Unreleased]: https://github.com/Pejvak-DSP/PejvakRVB/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/Pejvak-DSP/PejvakRVB/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/Pejvak-DSP/PejvakRVB/releases/tag/v1.0.0

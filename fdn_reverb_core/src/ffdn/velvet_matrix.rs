@@ -46,24 +46,22 @@ impl VelvetMatrix {
     pub fn new(n: usize, seed: u64) -> Self {
         // Round down to the nearest multiple of BLOCK_SIZE,
         // never below BLOCK_SIZE and never above MAX_LINES.
-        let n = (n / BLOCK_SIZE * BLOCK_SIZE)
-            .max(BLOCK_SIZE)
-            .min(MAX_LINES);
+        let n = (n / BLOCK_SIZE * BLOCK_SIZE).clamp(BLOCK_SIZE, MAX_LINES);
 
         let mut state = seed | 1;
         // --- Sign vectors -------------------------------------------
         let mut signs = [0.0; MAX_LINES];
-        for i in 0..n {
+        for slot in signs.iter_mut().take(n) {
             state ^= state << 13;
             state ^= state >> 7;
             state ^= state << 17;
-            signs[i] = if (state & 1) == 0 { 1.0 } else { -1.0 };
+            *slot = if (state & 1) == 0 { 1.0 } else { -1.0 };
         }
 
         // --- Fisher-Yates shuffle -----------------------------------
         let mut perm = [0usize; MAX_LINES];
-        for i in 0..n {
-            perm[i] = i;
+        for (i, slot) in perm.iter_mut().take(n).enumerate() {
+            *slot = i;
         }
         for i in (1..n).rev() {
             state ^= state << 13;
@@ -107,8 +105,8 @@ impl FeedbackMatrix for VelvetMatrix {
         }
 
         // Step 2: apply the permutation on the way out.
-        for i in 0..self.n {
-            y[i] = self.scratch[self.perm[i]];
+        for (slot, &perm_i) in y[..self.n].iter_mut().zip(self.perm[..self.n].iter()) {
+            *slot = self.scratch[perm_i];
         }
     }
 }
@@ -126,6 +124,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_range_loop)]
     fn velvet_is_orthogonal() {
         let n = 8;
         let mut m = VelvetMatrix::new(n, 0xC0FFEE);

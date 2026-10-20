@@ -540,8 +540,8 @@ mod tests {
         // as a naive per-tuple convolution.
         let seq = Sequence::new(50, 7);
         let mut history = vec![0.0; VN_SEQ_LEN];
-        for i in 0..VN_SEQ_LEN {
-            history[i] = (i as f64 * 0.01).sin();
+        for (i, h) in history.iter_mut().enumerate() {
+            *h = (i as f64 * 0.01).sin();
         }
         let write_idx = 500;
         let optimized = convolve_double_vector(&history, write_idx, &seq);
