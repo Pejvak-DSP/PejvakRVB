@@ -115,11 +115,60 @@ Audio programming is highly sensitive. A single allocation on the audio thread o
 
 These rules are specific to this project and **must be preserved** by every PR. Each one was learned the hard way, usually after a bug that cost hours of debugging or shipped in a release.
 
-### Automation Smoothing (`SAMPLE_ACCURATE_AUTOMATION = false`)
+### Zipper Noise: Two Separate Fixes
+
+Zipper noise in this plugin comes from **two independent sources**, and each has its own fix. Do not confuse them.
+
+#### 1. Host automation → `SAMPLE_ACCURATE_AUTOMATION = false`
 
 - `SAMPLE_ACCURATE_AUTOMATION` **must remain `false`** unless every `FloatParam` that feeds the DSP has `.with_smoother()` enabled **and** every path in `process_inner` reads `smoothed.next()` (per sample) or `smoothed.next_block()` (per sub-block).
-- With `SAMPLE_ACCURATE_AUTOMATION = true` and un-smoothed parameters, `nice-plug` splits the host buffer at every automation event. This produces a **vertical step** in the parameter value at each split point, which is heard as zipper noise.
-- This is the only viable fix for zipper noise in the current architecture. Adding per-sample smoothing manually inside `ReverbChannel` / `ReverbController` was tried; it was architecturally invasive and did not solve the actual problem, because the split points themselves were the source of the steps.
+- With `SAMPLE_ACCURATE_AUTOMATION = true` and un-smoothed parameters, `nice-plug` splits the host buffer at every automation event. This produces a **vertical step** in the parameter value at each split point, heard as zipper noise on automated parameters.
+- Setting it to `false` avoids the split entirely: `process_inner` sees a full host buffer, `value()` is constant within the block, and no step can occur.
+- Re-enabling it requires the `.with_smoother()` migration described above. Do not flip the flag without that migration.
+
+#### 2. Manual fader movement → per-sample DSP smoothing
+
+Manual fader dragging is a separate problem: even with a full host buffer, each UI frame produces a stepwise parameter change that the DSP would apply as a step in amplitude. The fix is a **one-pole per-sample smoothing** stage inside the DSP, described in the next section.
+
+### Per-Sample DSP Smoothing
+
+Every output-stage gain is smoothed per sample inside the DSP, with a **10 ms one-pole time constant**. Dragging a fader with the mouse therefore produces a continuous amplitude ramp instead of a stepped one, which eliminates the zipper noise that the ear perceives as a staircase in the output level.
+
+#### Location of the smoothed values
+
+- **`ReverbChannel`** (CloudSeed path):
+  - `smoothed_dry_out`, `smoothed_predelay_out`, `smoothed_early_out`, `smoothed_line_out`
+  - Advanced per sample inside `process()`.
+- **`ReverbController`** (shared + FFDN path):
+  - `smoothed_width` — used by **both engines** in the final M/S stage.
+  - `smoothed_dry_gain` and `smoothed_wet_gain` — used by the **FFDN path only** (the CloudSeed path smooths its own per-channel gains inside `ReverbChannel`).
+  - Advanced per sample in `process_cloudseed_inplace` / `process_ffdn_inplace`.
+  - Scratch buffers `smooth_width_scratch` and `smooth_dry_scratch` carry the per-sample values into the output helpers.
+
+#### The NaN-snap mechanism
+
+- Smoothed fields are initialized to `f64::NAN`.
+- At the top of `process()` (and at the top of the output stage in `ReverbController`), each smoothed field is checked: **if it is `NaN`, it snaps directly to its target** — no ramp.
+- `clear_buffers()` resets the smoothed fields back to `NaN`. Preset loads and sleep entry both call `clear_buffers()`, so those transitions take effect instantly. Undo/redo does **not** call `clear_buffers()` (see the undo section), so undo/redo gets a ~10 ms ramp — which is the correct behaviour for a parameter edit.
+
+#### Output helpers (renamed)
+
+- `apply_width_and_write` was replaced by **`apply_output_with_width`** (takes a `widths: &[f64]` slice of per-sample values).
+- `apply_width_and_write_with_dry` was replaced by **`apply_output_with_dry_and_width`** (takes both `dry_gains: &[f64]` and `widths: &[f64]`).
+- Both are **static** functions (not methods), because the caller has destructured `self` into disjoint field borrows.
+
+#### Rules for new gains
+
+Any new gain that multiplies the signal inside `process()` (or inside the FFDN / CloudSeed sub-paths) **must** be added to the corresponding smoothing stage:
+
+1. Add a `target_field` to the struct (the value set by `set_parameter` / `set_texture_parameter` / the setters).
+2. Add a `smoothed_field` initialized to `f64::NAN` in `new()`.
+3. Reset `smoothed_field` to `f64::NAN` inside `clear_buffers()`.
+4. Advance `smoothed_field` per sample inside `process()` (or the output loop) with `+= smooth_coeff * (target - smoothed)`.
+5. Check for `NaN` at the top of the loop and snap to target if present.
+6. Use `smoothed_field` — never `target_field` — in the per-sample multiplication.
+
+If the gain is a raw `mul` on the output without a `smoothed_*` counterpart, the fader will zipper on manual drag.
 
 ### CloudSeed `apply_undo_snapshot`: Do **Not** Reset the DSP
 
@@ -231,6 +280,9 @@ Before opening a PR, please verify:
 - [ ] If you touched the FFDN: `drive_one_keeps_network_stable` and `dynamics_keep_network_stable` still pass.
 - [ ] If you touched the `apply_factory_preset` path: every existing factory preset still sounds identical (or the change was approved by a maintainer).
 - [ ] If you touched `ParsedPreset` or `xml_to_params`: both a full XML and a partial XML load correctly.
+- [ ] **If you added or changed an output-stage gain**: it has a `smoothed_*` field, is reset to `NaN` in `clear_buffers()`, and is advanced per sample inside `process()`.
+- [ ] **Manual fader drag test**: dragging the affected fader produces no zipper noise (use a sustained reverb tail).
+- [ ] **Preset load test**: after loading a preset, the smoothed gains snap instantly (no 10 ms glide).
 
 ---
 
@@ -248,7 +300,7 @@ When loading a user XML that does not contain a `<TextureRack>` block, `apply_te
 
 ### `SAMPLE_ACCURATE_AUTOMATION`
 
-See [Automation Smoothing](#automation-smoothing-sample_accurate_automation--false). If a PR enables it, the PR will be rejected unless it also adds `.with_smoother()` to every DSP-facing `FloatParam` and updates every `process_inner` path to consume the smoothed value.
+See [Zipper Noise: Two Separate Fixes](#zipper-noise-two-separate-fixes). If a PR enables it, the PR will be rejected unless it also adds `.with_smoother()` to every DSP-facing `FloatParam` and updates every `process_inner` path to consume the smoothed value.
 
 ---
 

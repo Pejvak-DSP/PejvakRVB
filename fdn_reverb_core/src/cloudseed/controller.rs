@@ -171,7 +171,23 @@ pub struct ReverbController {
     left_channel_in: Vec<f64>,
     right_channel_in: Vec<f64>,
     parameters: [f64; PARAM_COUNT],
-    stereo_width: f64,
+
+    // ---- Output-stage smoothing ---------------------------------
+    // These are used by both engines:
+    //   * `smoothed_width` is applied in the final M/S stage of
+    //     both engines.
+    //   * `smoothed_dry_gain` and `smoothed_wet_gain` are used only
+    //     by the FFDN path (the CloudSeed path smooths its own
+    //     per-channel gains inside `ReverbChannel`).
+    smoothed_width: f64,
+    smoothed_dry_gain: f64,
+    smoothed_wet_gain: f64,
+    smooth_coeff: f64,
+    // Scratch buffers for the per-sample smoothed values, so they
+    // can be passed as slices to the static output helpers.
+    smooth_width_scratch: Vec<f64>,
+    smooth_dry_scratch: Vec<f64>,
+
     frozen: bool,
     texture_rack: TextureRack,
 
@@ -288,7 +304,12 @@ impl ReverbController {
             left_channel_in: vec![0.0; BUFFER_SIZE],
             right_channel_in: vec![0.0; BUFFER_SIZE],
             parameters: [0.0; PARAM_COUNT],
-            stereo_width: 1.0,
+            smoothed_width: f64::NAN,
+            smoothed_dry_gain: f64::NAN,
+            smoothed_wet_gain: f64::NAN,
+            smooth_coeff: 1.0 - (-1.0 / (sr * 0.010)).exp(),
+            smooth_width_scratch: vec![0.0; BUFFER_SIZE],
+            smooth_dry_scratch: vec![0.0; BUFFER_SIZE],
             frozen: false,
             texture_rack,
             illusion: Illusion::new(samplerate as f64),
@@ -339,6 +360,7 @@ impl ReverbController {
 
     pub fn set_samplerate(&mut self, samplerate: i32) {
         self.samplerate = samplerate;
+        self.smooth_coeff = 1.0 - (-1.0 / (samplerate as f64 * 0.010)).exp();
         self.channel_l.set_samplerate(samplerate);
         self.channel_r.set_samplerate(samplerate);
         self.texture_rack.set_samplerate(samplerate as f64);
@@ -408,8 +430,10 @@ impl ReverbController {
         self.parameters[index] = value;
 
         // Width is handled by the controller itself; not forwarded.
+        // The target is stored in `self.parameters[41]` (already set
+        // above). The smoothed value is advanced per-sample in
+        // `process_*_inplace` and used to fill `smooth_width_scratch`.
         if index == 41 {
-            self.stereo_width = scaled_parameter_value(41, value);
             return;
         }
 
@@ -907,6 +931,11 @@ impl ReverbController {
         self.ffdn_lp_r.reset();
         self.ffdn_diff_l.clear_buffers();
         self.ffdn_diff_r.clear_buffers();
+        // Force the output-stage smoothed gains to snap on the next
+        // block. Preset load is the primary user of this path.
+        self.smoothed_width = f64::NAN;
+        self.smoothed_dry_gain = f64::NAN;
+        self.smoothed_wet_gain = f64::NAN;
     }
 
     /// Processes one stereo block in place. Input/output are `f32` (the host
@@ -976,11 +1005,22 @@ impl ReverbController {
             &mut self.right_channel_in[..n],
         );
 
-        self.apply_width_and_write(
+        // Per-sample width smoothing.
+        let width_target = scaled_parameter_value(41, self.parameters[41]);
+        if self.smoothed_width.is_nan() {
+            self.smoothed_width = width_target;
+        }
+        for i in 0..n {
+            self.smoothed_width += self.smooth_coeff * (width_target - self.smoothed_width);
+            self.smooth_width_scratch[i] = self.smoothed_width;
+        }
+
+        Self::apply_output_with_width(
             left,
             right,
             &self.left_channel_in[..n],
             &self.right_channel_in[..n],
+            &self.smooth_width_scratch[..n],
             n,
         );
     }
@@ -1002,9 +1042,6 @@ impl ReverbController {
     /// not conflict — no scratch copies, no `.clone()`, no `Vec::new`
     /// on this path.
     fn process_ffdn_inplace(&mut self, left: &mut [f32], right: &mut [f32], n: usize) {
-        let dry_gain = self.get_scaled_parameter(37);
-        let wet_gain = self.get_scaled_parameter(40);
-
         // 1. Stage f32 input into the f64 working buffers.
         //
         //    The InputMix parameter (index 0) is intentionally NOT
@@ -1088,12 +1125,16 @@ impl ReverbController {
         self.ffdn
             .process_inplace(&mut self.ffdn_buf_l[..n], &mut self.ffdn_buf_r[..n]);
 
-        // 6. Wet gain (MainOut). Applied once, before any texture
-        //    processing, so the texture layers see a signal whose
-        //    level matches what the user set on the MIXER fader.
+        // 6. Wet gain (MainOut) with per-sample smoothing.
+        let wet_target = self.get_scaled_parameter(40);
+        if self.smoothed_wet_gain.is_nan() {
+            self.smoothed_wet_gain = wet_target;
+        }
         for i in 0..n {
-            self.ffdn_buf_l[i] *= wet_gain;
-            self.ffdn_buf_r[i] *= wet_gain;
+            self.smoothed_wet_gain +=
+                self.smooth_coeff * (wet_target - self.smoothed_wet_gain);
+            self.ffdn_buf_l[i] *= self.smoothed_wet_gain;
+            self.ffdn_buf_r[i] *= self.smoothed_wet_gain;
         }
 
         // 7. Texture rack (optional), then M/S width + dry mix.
@@ -1133,15 +1174,33 @@ impl ReverbController {
             &mut self.right_channel_in[..n],
         );
 
-        let w = self.stereo_width;
-        Self::apply_width_and_write_with_dry(
+        // Per-sample smoothing of dry_gain and width, then final
+        // output write.
+        let dry_target = self.get_scaled_parameter(37);
+        let width_target = scaled_parameter_value(41, self.parameters[41]);
+        if self.smoothed_dry_gain.is_nan() {
+            self.smoothed_dry_gain = dry_target;
+        }
+        if self.smoothed_width.is_nan() {
+            self.smoothed_width = width_target;
+        }
+        for i in 0..n {
+            self.smoothed_dry_gain +=
+                self.smooth_coeff * (dry_target - self.smoothed_dry_gain);
+            self.smoothed_width +=
+                self.smooth_coeff * (width_target - self.smoothed_width);
+            self.smooth_dry_scratch[i] = self.smoothed_dry_gain;
+            self.smooth_width_scratch[i] = self.smoothed_width;
+        }
+
+        Self::apply_output_with_dry_and_width(
             left,
             right,
             &self.left_channel_in[..n],
             &self.right_channel_in[..n],
+            &self.smooth_dry_scratch[..n],
+            &self.smooth_width_scratch[..n],
             n,
-            dry_gain,
-            w,
         );
     }
 
@@ -1159,58 +1218,34 @@ impl ReverbController {
     /// 0.5, so the per-sample math collapses to a single multiply on
     /// the side component.
     #[inline]
-    fn apply_width_and_write_with_dry(
-        left: &mut [f32],
-        right: &mut [f32],
-        wet_l: &[f64],
-        wet_r: &[f64],
-        n: usize,
-        dry_gain: f64,
-        w: f64,
-    ) {
-        // mix dry into the wet signal BEFORE applying M/S
-        // width. This matches the CloudSeed engine's behaviour,
-        // where the Width parameter controls the stereo image of
-        // the *entire* output (dry + wet), not just the wet tail.
-        //
-        // Concretely, at w = 0 the full output (dry + wet) collapses
-        // to mono — the user-facing behaviour that the Width fader
-        // promises. The previous code applied width only to the wet
-        // part and added dry afterwards, so at w = 0 the wet became
-        // mono but the dry stayed stereo, which the user perceived
-        // as "not actually mono".
-        for i in 0..n {
-            let l = wet_l[i] + (left[i] as f64) * dry_gain;
-            let r = wet_r[i] + (right[i] as f64) * dry_gain;
-            let mid = (l + r) * 0.5;
-            let side = (l - r) * 0.5 * w;
-            left[i] = (mid + side) as f32;
-            right[i] = (mid - side) as f32;
-        }
-    }
-
-    /// Shared M/S-width + f32-conversion stage, used by both engines.
+    /// CloudSeed output stage: applies M/S width (smoothed
+    /// per-sample via `widths`) and writes the stereo result into
+    /// the f32 host buffers.
     ///
-    /// Takes the L and R f64 wet signals and writes the stereo
-    /// output into the f32 host buffers.
-    fn apply_width_and_write(
-        &self,
+    /// The `widths` slice contains the per-sample smoothed width,
+    /// already multiplied by 0.5. It must have length >= `n`.
+    fn apply_output_with_width(
         left: &mut [f32],
         right: &mut [f32],
         in_l: &[f64],
         in_r: &[f64],
+        widths: &[f64],
         n: usize,
     ) {
-        let w = self.stereo_width;
         let half_v = f64x4::splat(0.5);
-        let w_v = f64x4::splat(w * 0.5);
 
         let mut i = 0;
         while i + 4 <= n {
             let l4 = f64x4::new([in_l[i], in_l[i + 1], in_l[i + 2], in_l[i + 3]]);
             let r4 = f64x4::new([in_r[i], in_r[i + 1], in_r[i + 2], in_r[i + 3]]);
+            let w4 = f64x4::new([
+                widths[i] * 0.5,
+                widths[i + 1] * 0.5,
+                widths[i + 2] * 0.5,
+                widths[i + 3] * 0.5,
+            ]);
             let mid = (l4 + r4) * half_v;
-            let side = (l4 - r4) * w_v;
+            let side = (l4 - r4) * w4;
             let lo = (mid + side).to_array();
             let ro = (mid - side).to_array();
             left[i] = lo[0] as f32;
@@ -1226,11 +1261,36 @@ impl ReverbController {
         while i < n {
             let l = in_l[i];
             let r = in_r[i];
+            let w = widths[i];
             let mid = (l + r) * 0.5;
             let side = (l - r) * 0.5 * w;
             left[i] = (mid + side) as f32;
             right[i] = (mid - side) as f32;
             i += 1;
+        }
+    }
+
+    /// FFDN output stage: mixes the dry input (smoothed via
+    /// `dry_gains`) with the wet signal, then applies M/S width
+    /// (smoothed via `widths`), and writes into the host buffers.
+    ///
+    /// `dry_gains` and `widths` must have length >= `n`.
+    fn apply_output_with_dry_and_width(
+        left: &mut [f32],
+        right: &mut [f32],
+        wet_l: &[f64],
+        wet_r: &[f64],
+        dry_gains: &[f64],
+        widths: &[f64],
+        n: usize,
+    ) {
+        for i in 0..n {
+            let l = wet_l[i] + (left[i] as f64) * dry_gains[i];
+            let r = wet_r[i] + (right[i] as f64) * dry_gains[i];
+            let mid = (l + r) * 0.5;
+            let side = (l - r) * 0.5 * widths[i];
+            left[i] = (mid + side) as f32;
+            right[i] = (mid - side) as f32;
         }
     }
 
@@ -1286,10 +1346,17 @@ impl ReverbController {
         self.channel_l.process(&self.left_channel_in[..n]);
         self.channel_r.process(&self.right_channel_in[..n]);
 
+        // Per-sample width smoothing.
+        let width_target = scaled_parameter_value(41, self.parameters[41]);
+        if self.smoothed_width.is_nan() {
+            self.smoothed_width = width_target;
+        }
+        for i in 0..n {
+            self.smoothed_width += self.smooth_coeff * (width_target - self.smoothed_width);
+            self.smooth_width_scratch[i] = self.smoothed_width;
+        }
+
         // ---- Texture Rack hook ---------------------------------------
-        // See `process_block_inplace` for the reasoning. Same logic, but
-        // writing into `out_l` / `out_r` instead of in-place buffers.
-        // Zero allocation on the audio thread in both paths.
         if self.texture_rack.is_active() {
             let ol = self.channel_l.get_output();
             let or_ = self.channel_r.get_output();
@@ -1301,23 +1368,22 @@ impl ReverbController {
                 &mut self.right_channel_in[..n],
             );
 
-            let w = self.stereo_width;
             for i in 0..n {
                 let l = self.left_channel_in[i];
                 let r = self.right_channel_in[i];
+                let w = self.smooth_width_scratch[i];
                 let mid = (l + r) * 0.5;
                 let side = (l - r) * 0.5 * w;
                 out_l[i] = (mid + side) as f32;
                 out_r[i] = (mid - side) as f32;
             }
         } else {
-            // Bit-exact original fast path.
             let ol = self.channel_l.get_output();
             let or_ = self.channel_r.get_output();
-            let w = self.stereo_width;
             for i in 0..n {
                 let l = ol[i];
                 let r = or_[i];
+                let w = self.smooth_width_scratch[i];
                 let mid = (l + r) * 0.5;
                 let side = (l - r) * 0.5 * w;
                 out_l[i] = (mid + side) as f32;

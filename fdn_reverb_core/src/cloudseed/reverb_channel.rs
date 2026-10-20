@@ -132,10 +132,23 @@ pub struct ReverbChannel {
     diffuser_enabled: bool,
     late_delay_enabled: bool,
 
+    // Target values — set by `set_parameter()`.
     dry_out: f64,
     predelay_out: f64,
     early_out: f64,
     line_out: f64,
+
+    // Smoothed values — advanced per sample in `process()`.
+    // Initialized to NaN so that `process()` snaps them to
+    // `target` on the very first call (before any parameter
+    // change), and again after every `clear_buffers()`.
+    smoothed_dry_out: f64,
+    smoothed_predelay_out: f64,
+    smoothed_early_out: f64,
+    smoothed_line_out: f64,
+
+    // One-pole smoothing coefficient (10 ms time constant).
+    smooth_coeff: f64,
     cross_seed: f64,
     channel_lr: ChannelLR,
     frozen: bool,
@@ -216,6 +229,11 @@ impl ReverbChannel {
             predelay_out: 0.0,
             early_out: 0.5,
             line_out: 0.5,
+            smoothed_dry_out: f64::NAN,
+            smoothed_predelay_out: f64::NAN,
+            smoothed_early_out: f64::NAN,
+            smoothed_line_out: f64::NAN,
+            smooth_coeff: 0.0, // set by update_smooth_coeff()
             cross_seed: 0.0,
             channel_lr: left_or_right,
             frozen: false,
@@ -225,6 +243,7 @@ impl ReverbChannel {
         ch.low_pass.set_cutoff_hz(20000.0);
         ch.diffuser.set_interpolation_enabled(true);
         ch.recompute_line_seeds();
+        ch.update_smooth_coeff();
         ch
     }
 
@@ -234,6 +253,7 @@ impl ReverbChannel {
 
     pub fn set_samplerate(&mut self, samplerate: i32) {
         self.samplerate = samplerate as f64;
+        self.update_smooth_coeff();
         self.high_pass.set_samplerate(self.samplerate);
         self.low_pass.set_samplerate(self.samplerate);
         for line in &mut self.lines {
@@ -546,11 +566,38 @@ impl ReverbChannel {
         // ---- output mix (with OUTPUT Velvet-Noise diffusion) -------------
         let predelay_out = self.pre_delay.get_output();
 
+        // Snap the smoothed values to their targets on the first
+        // block (or right after `clear_buffers()` — preset load,
+        // sleep entry). This is the NaN-snap mechanism: the fields
+        // are initialized to NaN, and `clear_buffers()` also resets
+        // them to NaN. Any other time (user dragging a fader, host
+        // automation) the smoothed values glide to the target at
+        // the 10 ms coefficient rate.
+        if self.smoothed_dry_out.is_nan() {
+            self.smoothed_dry_out = self.dry_out;
+            self.smoothed_predelay_out = self.predelay_out;
+            self.smoothed_early_out = self.early_out;
+            self.smoothed_line_out = self.line_out;
+        }
+
         for i in 0..n {
+            // Advance each smoothed gain by one step of the one-pole
+            // filter. This is what makes the output immune to the
+            // stepwise parameter updates that a manual fader drag or
+            // host automation produces.
+            self.smoothed_dry_out +=
+                self.smooth_coeff * (self.dry_out - self.smoothed_dry_out);
+            self.smoothed_predelay_out +=
+                self.smooth_coeff * (self.predelay_out - self.smoothed_predelay_out);
+            self.smoothed_early_out +=
+                self.smooth_coeff * (self.early_out - self.smoothed_early_out);
+            self.smoothed_line_out +=
+                self.smooth_coeff * (self.line_out - self.smoothed_line_out);
+
             // Wet sum: everything except the dry signal.
-            let wet = self.predelay_out * predelay_out[i]
-                + self.early_out * self.early_buffer[i]
-                + self.line_out * self.temp_buffer[i];
+            let wet = self.smoothed_predelay_out * predelay_out[i]
+                + self.smoothed_early_out * self.early_buffer[i]
+                + self.smoothed_line_out * self.temp_buffer[i];
 
             let wet_vn = if apply_velvet {
                 self.velvet_out.process(wet)
@@ -558,7 +605,7 @@ impl ReverbChannel {
                 wet
             };
 
-            self.out_buffer[i] = self.dry_out * input[i] + wet_vn;
+            self.out_buffer[i] = self.smoothed_dry_out * input[i] + wet_vn;
         }
     }
 
@@ -576,6 +623,16 @@ impl ReverbChannel {
         for line in &mut self.lines {
             line.clear_buffers();
         }
+
+        // Force the smoothed gains to snap to their targets on the
+        // next block. Preset load and sleep entry both call
+        // `clear_buffers`, and in both cases we want the new state
+        // to take effect instantly — a 10 ms glide in those cases
+        // would be audible and misleading.
+        self.smoothed_dry_out = f64::NAN;
+        self.smoothed_predelay_out = f64::NAN;
+        self.smoothed_early_out = f64::NAN;
+        self.smoothed_line_out = f64::NAN;
     }
 
     /// Enables / disables freeze. When on, the input to the delay lines
@@ -684,5 +741,15 @@ impl ReverbChannel {
 
     fn ms2samples(&self, ms: f64) -> f64 {
         ms / 1000.0 * self.samplerate
+    }
+
+    /// Recomputes the one-pole smoothing coefficient from the
+    /// current sample rate. Called from `new()` and `set_samplerate()`.
+    fn update_smooth_coeff(&mut self) {
+        // 10 ms time constant: after 10 ms, ~63 % of the gap has
+        // closed. The initial per-sample step is only `smooth_coeff`
+        // × (target - current), which is ~0.0021 at 48 kHz — that is
+        // -54 dB, inaudible.
+        self.smooth_coeff = 1.0 - (-1.0 / (self.samplerate * 0.010)).exp();
     }
 }
