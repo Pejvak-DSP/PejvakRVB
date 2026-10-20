@@ -108,47 +108,55 @@ const DUCK_RELEASE_MS: f64 = 300.0;
 const GATE_ATTACK_MS: f64 = 2.0;
 const GATE_RELEASE_MS: f64 = 80.0;
 
-/// Gate threshold range. The `gate` parameter (0..1) is mapped to
-/// a linear threshold in this range.
-const GATE_THRESHOLD_MIN: f64 = 1.0e-4; // -80 dBFS
-const GATE_THRESHOLD_MAX: f64 = 3.0e-2; // -30 dBFS
+// -60 dBFS .. -10 dBFS. The previous max (-30 dBFS) was below
+// the typical FFDN wet signal level (~0.05 to 0.5), so a gate at
+// full amount never closed in practice. -10 dBFS is just above
+// the loudest wet level and lets the gate cut the tail as soon
+// as it drops below the chosen threshold.
+const GATE_THRESHOLD_MIN: f64 = 1.0e-3;   // -60 dBFS
+const GATE_THRESHOLD_MAX: f64 = 3.16e-1;  // -10 dBFS
 
 /// Smooth, tubey saturation.
 ///
 /// # Why this curve
 ///
-/// The previous version used `pre_gain = 1 + amount * 5` — up to 6×.
-/// At that gain, typical FDN levels (0.1 .. 0.3) are pushed deep
-/// into the compressor knee, which removes 15–50 % of the amplitude
-/// **per round trip**. Because the saturation sits inside the
-/// feedback loop, that per-iteration loss compounds geometrically
-/// and the reverb tail collapses within a few hundred milliseconds
-/// even at moderate drive settings.
+/// Three variants of this shaper have existed:
 ///
-/// The new version uses a much gentler pre-gain (`1x .. 1.8x`) and
-/// a small makeup term that compensates for the residual RMS loss.
-/// At typical reverb levels the shaper is now within 1–3 % of
-/// linear, so the tail keeps its natural decay, while loud transients
-/// still receive the warm, tubey compression that gives the stage
-/// its character.
+/// 1. **`pre_gain = 1 + amount * 5` (up to 6×).** Drove typical
+///    FDN levels (0.1 .. 0.3) deep into the compression knee,
+///    removing 15–50 % of the amplitude per round trip. Because
+///    the saturation sits inside the feedback loop, that loss
+///    compounds geometrically and the reverb tail collapsed
+///    within a few hundred milliseconds even at moderate drive
+///    settings.
+///
+/// 2. **`pre_gain = 1 + amount * 0.8` plus a `1 + 0.15·amount`
+///    makeup term.** The gentler pre-gain fixed the tail
+///    collapse, but the makeup introduced a small-signal gain
+///    of `1 + 0.15·amount²` (1.15 at amount = 1). Because this
+///    gain sits inside the feedback loop, any delay line with
+///    `g_mid · 1.15 > 1` would grow instead of decay — e.g. decay
+///    = 3 s with size ≈ 50 ms gives g_mid ≈ 0.89, and
+///    0.89 × 1.15 ≈ 1.024 > 1.
+///
+/// 3. **Current version: pre-gain 1× .. 1.8×, no makeup.** The
+///    small-signal gain is exactly 1.0, so the network is stable
+///    across the whole decay/size grid. Mid-level signals still
+///    get the warm compression that is the whole point of a
+///    saturation stage; quiet tails pass through essentially
+///    untouched.
 #[inline]
-fn velvet_saturate(x: f64, amount: f64) -> f64 {
-    if amount <= 0.0 {
+fn velvet_saturate(x: f64, amount: f64) -> f64 {    if amount <= 0.0 {
         return x;
     }
     // Pre-gain: 1x .. 1.8x. Enough to push transients into the
     // curved region while leaving quiet reverb tails untouched.
     let pre_gain = 1.0 + amount * 0.8;
     let a = x * pre_gain;
-    // Sine shaper: `a / sqrt(1 + a²)`, algebraically `sin(atan(a))`.
-    // Its Taylor expansion is `a − a³/6 + …`, so for |a| ≪ 1 it is
-    // transparent — the small-signal loop gain stays at unity.
+
     let sat = a / (1.0 + a * a).sqrt();
-    // Small makeup term that offsets the residual compression of
-    // mid-level signals (0.2 .. 0.4). Chosen so the effective loop
-    // gain at those levels stays within ±3 % of unity.
-    let makeup = 1.0 + amount * 0.15;
-    let comp = sat * makeup / pre_gain;
+
+    let comp = sat / pre_gain;
     // Blend so `amount = 0` remains bit-exact passthrough.
     x + amount * (comp - x)
 }
@@ -689,7 +697,7 @@ impl FfdnCore {
             // the feedback loop — the network's internal state is
             // completely unaffected.
             if attack_enabled {
-                // Peak follower (fast attack, moderate release).
+                // --- Peak follower (fast attack, moderate release) ---
                 let abs_l = wet_l.abs();
                 if abs_l > self.attack_peak_l {
                     self.attack_peak_l += self.attack_peak_coeff * (abs_l - self.attack_peak_l);
@@ -705,20 +713,38 @@ impl FfdnCore {
                         self.attack_peak_release_coeff * (abs_r - self.attack_peak_r);
                 }
 
-                // Slow gain follower lags behind the peak.
+                // --- Slow gain follower (the "swell in" ramp) ---
                 self.attack_gain_l +=
                     self.attack_gain_coeff * (self.attack_peak_l - self.attack_gain_l);
                 self.attack_gain_r +=
                     self.attack_gain_coeff * (self.attack_peak_r - self.attack_gain_r);
 
-                // Ratio gives the soft-attack gain. Guarded against
-                // division by a near-zero peak so silence stays
-                // silent instead of producing 0/0.
+                // --- Blend-based attenuation ---
+                //
+                // The ratio `gain / peak` alone gives a maximum of
+                // about -4 dB at the very start (because the peak
+                // follower releases within 200 ms and the gain
+                // follower barely moves in the first few hundred
+                // samples). That made the attack barely audible.
+                //
+                // We now use `amount` to control *both* the ramp
+                // time and the *depth* of the initial attenuation:
+                //
+                //   a = 0   → 1.0 (no attenuation, stage effectively
+                //                   bypassed)
+                //   a = 0.5 → mid-attenuation, soft swell
+                //   a = 1   → full attenuation at t=0, gradual
+                //             swell to unity
+                //
+                // The math is a simple linear blend between "no
+                // attenuation" (1.0) and "ratio attenuation" (atten).
                 if self.attack_peak_l > 1.0e-12 {
-                    wet_l *= (self.attack_gain_l / self.attack_peak_l).clamp(0.0, 1.0);
+                    let atten_l = (self.attack_gain_l / self.attack_peak_l).clamp(0.0, 1.0);
+                    wet_l *= 1.0 - self.attack * (1.0 - atten_l);
                 }
                 if self.attack_peak_r > 1.0e-12 {
-                    wet_r *= (self.attack_gain_r / self.attack_peak_r).clamp(0.0, 1.0);
+                    let atten_r = (self.attack_gain_r / self.attack_peak_r).clamp(0.0, 1.0);
+                    wet_r *= 1.0 - self.attack * (1.0 - atten_r);
                 }
             }
 
@@ -732,9 +758,28 @@ impl FfdnCore {
                 } else {
                     self.duck_env += self.duck_release_coeff * (dry_abs - self.duck_env);
                 }
-                // Ducking reduces the wet only; the dry path is
-                // mixed in by the caller and is not touched here.
-                let duck_gain = 1.0 - ducking_amount * self.duck_env;
+
+                // --- Exponential attenuation (was linear) ---
+                //
+                // The previous linear formula `1 - amount × env`
+                // gave a maximum of ~-3 dB at amount = 1 (with a
+                // typical dry level of env = 0.3), which was
+                // imperceptible.
+                //
+                // The new formula maps `env` to a normalised
+                // 0..1 range (0.5 = typical dry peak) and applies
+                // up to -24 dB of attenuation at full amount and
+                // full env. The dB attenuation is then converted
+                // back to a linear gain.
+                //
+                // Examples at amount = 1.0:
+                //   env = 0.05 → -2.4 dB
+                //   env = 0.15 → -7.2 dB
+                //   env = 0.30 → -14.4 dB
+                //   env = 0.50 → -24.0 dB (fully ducked)
+                let env_norm = (self.duck_env / 0.5).clamp(0.0, 1.0);
+                let atten_db = -24.0 * ducking_amount * env_norm;
+                let duck_gain = 10.0_f64.powf(atten_db / 20.0);
                 wet_l *= duck_gain;
                 wet_r *= duck_gain;
             }
@@ -753,16 +798,22 @@ impl FfdnCore {
                 } else {
                     self.gate_env_r += self.gate_release_coeff * (abs_r - self.gate_env_r);
                 }
-                // Linear fade-out below the threshold. Above the
-                // threshold, gain is exactly 1 — no attenuation.
+
+                // --- Squared fade (was linear) ---
+                //
+                // Below the threshold the gain drops as
+                // `(env / thr)²`, which produces a much more
+                // decisive gate close. The linear curve previously
+                // used made the transition from "open" to "closed"
+                // sound like a slow fade rather than a gate.
                 let thr = self.gate_threshold;
                 let g_l = if self.gate_env_l < thr {
-                    (self.gate_env_l / thr).clamp(0.0, 1.0)
+                    (self.gate_env_l / thr).powi(2).clamp(0.0, 1.0)
                 } else {
                     1.0
                 };
                 let g_r = if self.gate_env_r < thr {
-                    (self.gate_env_r / thr).clamp(0.0, 1.0)
+                    (self.gate_env_r / thr).powi(2).clamp(0.0, 1.0)
                 } else {
                     1.0
                 };
@@ -921,17 +972,19 @@ impl FfdnCore {
         self.cross_feed = v.clamp(0.0, 1.0);
     }
 
-    /// Drive amount (0..1). Blends the feedback sum toward `tanh()`
-    /// inside every delay line's write path.
+    /// Drive amount (0..1). Blends the feedback sum toward
+    /// `velvet_saturate()` inside every delay line's write path.
     ///
     /// At `0.0` the write is exactly `new = in + feedback * gain`
-    /// (bit-identical to the pre- engine). At `1.0` every
-    /// sample entering a delay line passes through `tanh(x)`, which
-    /// bounds the peak and adds a gentle compression that is
-    /// especially audible on long, dense tails.
+    /// (bit-identical to the pre- engine). At `1.0` every sample
+    /// entering a delay line passes through the sine shaper
+    /// `a / sqrt(1 + a²)` with a 1.8× pre-gain, which bounds the
+    /// peak and adds a gentle compression that is especially
+    /// audible on long, dense tails.
     ///
-    /// Drive is always safe: `tanh(x)` never amplifies, so the
-    /// network can only get *more* stable.
+    /// Drive is always safe for the small-signal gain: the shaper
+    /// is unity-linear as `|x| → 0`, so a quiet tail is not
+    /// amplified and the network cannot become unstable.
     pub fn set_drive(&mut self, v: f64) {
         self.drive = v.clamp(0.0, 1.0);
     }
@@ -1126,7 +1179,12 @@ impl FfdnCore {
             self.attack_enabled = false;
             return;
         }
-        let attack_ms = ATTACK_GAIN_MIN_MS + a * (ATTACK_GAIN_MAX_MS - ATTACK_GAIN_MIN_MS);
+        // The attack time uses a square-root curve so the audible
+        // effect grows quickly with `amount`. At a = 0.25 the attack
+        // time is already ~250 ms (square-law mapping), which is long
+        // enough to hear on a typical 3 s reverb tail.
+        let attack_ms =
+            ATTACK_GAIN_MIN_MS + a.sqrt() * (ATTACK_GAIN_MAX_MS - ATTACK_GAIN_MIN_MS);
         self.attack_peak_coeff = one_pole_coeff(ATTACK_PEAK_ATTACK_MS, self.sample_rate);
         self.attack_peak_release_coeff = one_pole_coeff(ATTACK_PEAK_RELEASE_MS, self.sample_rate);
         self.attack_gain_coeff = one_pole_coeff(attack_ms, self.sample_rate);
@@ -1191,7 +1249,7 @@ struct SingleNetwork {
 
 impl SingleNetwork {
     fn new(initial_lines: usize, seed: u64, sample_rate: f64) -> Self {
-        let max_delay_samples = 24000usize;
+        let max_delay_samples = (sample_rate * 0.5).ceil() as usize;
 
         // Pre-allocate `MAX_LINES` delay lines. Only the first
         // `active_lines` will actually be processed; the rest sit
@@ -1278,7 +1336,7 @@ impl SingleNetwork {
     fn recompute_delays(&mut self, base_ms: f64, spread: f64, sample_rate: f64) {
         let n = self.active_lines;
         let base = base_ms * 1e-3 * sample_rate;
-
+    
         let mut state = self.seed | 1;
         for i in 0..n {
             state ^= state << 13;
@@ -1286,11 +1344,24 @@ impl SingleNetwork {
             state ^= state << 17;
             let unit = ((state >> 11) as f64) / ((1u64 << 53) as f64);
             let scale = 1.0 + spread * (2.0 * unit - 1.0);
-            let samples = (base * scale).round().max(2.0) as usize;
+    
+            // Clamp to the line's actual capacity BEFORE storing the
+            // value in `delays_samples`.
+            //
+            // `set_delay` already clamps internally, but
+            // `recompute_feedback` reads its delay time from
+            // `delays_samples`. Without this clamp, whenever Size
+            // pushes past the buffer cap the feedback is computed for
+            // a longer delay than the line can actually hold, and the
+            // audible decay comes out shorter than requested.
+            let samples_raw = (base * scale).round().max(2.0) as usize;
+            let samples = samples_raw.min(self.lines[i].max_delay_samples());
+    
             self.delays_samples[i] = samples;
             self.lines[i].set_delay(samples);
         }
     }
+    
 
     fn recompute_feedback(&mut self, decay_seconds: f64, sample_rate: f64) {
         for i in 0..self.active_lines {
@@ -1370,11 +1441,9 @@ impl SingleNetwork {
     /// construction time. Newly-activated lines are cleared to
     /// prevent a stale buffer from bleeding into the first block.
     ///
-    /// This does allocate (the matrix is rebuilt), but the same
-    /// pattern is already used by `rebuild_matrix`, and the caller
-    /// (`FfdnCore::set_lines`) is only invoked from the plugin when
-    /// the user actually moves the Lines knob — an event that is by
-    /// definition not real-time-critical.
+    /// `rebuild_matrix` uses inline `MatrixKind` storage (fixed-size
+    /// arrays, no `Box`, no `Vec`), so this operation does not
+    /// allocate on the audio thread.
     fn set_active_lines(&mut self, n: usize) {
         let n = n.clamp(4, MAX_LINES);
         if n == self.active_lines {
@@ -1803,6 +1872,65 @@ mod tests {
         for v in &left {
             assert!(v.is_finite(), "NaN/Inf with dynamics active");
             assert!(v.abs() < 100.0, "output blew up: {}", v);
+        }
+    }
+
+    /// Regression test for the drive stability fix.
+    ///
+    /// `velvet_saturate` used to include a makeup term that gave
+    /// the shaper a small-signal gain of `1 + 0.15·amount²` (1.15
+    /// at amount = 1). Inside the feedback loop, any line with
+    /// `g_mid · 1.15 > 1` would grow instead of decay. With decay
+    /// = 3 s and size ≈ 50 ms, g_mid ≈ 0.89, so the effective loop
+    /// gain was ≈ 1.024 — the tail grew until the compressor
+    /// caught it.
+    #[test]
+    fn drive_one_keeps_network_stable() {
+        let mut ffdn = FfdnCore::new(8, 256, 48000.0);
+        ffdn.set_decay_seconds(3.0);
+        ffdn.set_base_delay_ms(50.0);
+        ffdn.set_damping_hz(20000.0);
+        ffdn.set_drive(1.0);
+        ffdn.set_drive_enabled(true);
+
+        let mut left = vec![0.0; 48000];
+        let mut right = vec![0.0; 48000];
+        left[0] = 1.0;
+        right[0] = 1.0;
+        ffdn.process_inplace(&mut left, &mut right);
+
+        for v in &left {
+            assert!(v.is_finite(), "drive=1 produced NaN/Inf");
+            assert!(v.abs() < 100.0, "drive=1 output blew up: {}", v);
+        }
+
+        let n = left.len();
+        let early: f64 = left[0..n / 10].iter().map(|v| v * v).sum();
+        let late: f64 = left[n * 9 / 10..].iter().map(|v| v * v).sum();
+        assert!(
+            early > late,
+            "tail grew instead of decaying: early={}, late={}",
+            early,
+            late
+        );
+    }
+
+    /// Confirms that the small-signal gain of `velvet_saturate`
+    /// is unity at every drive amount. Any gain > 1 here would
+    /// make every feedback line whose `g_mid > 1 / gain` unstable.
+    #[test]
+    fn velvet_saturate_has_unity_small_signal_gain() {
+        for amount in [0.0_f64, 0.25, 0.5, 0.75, 1.0] {
+            let eps = 1.0e-5;
+            let y0 = super::velvet_saturate(0.0, amount);
+            let y1 = super::velvet_saturate(eps, amount);
+            let slope = (y1 - y0) / eps;
+            assert!(
+                (slope - 1.0).abs() < 1.0e-3,
+                "small-signal slope at amount={}: {} (expected 1.0)",
+                amount,
+                slope
+            );
         }
     }
 }

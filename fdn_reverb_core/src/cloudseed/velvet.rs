@@ -62,15 +62,34 @@ const REFERENCE_SR: f64 = 48_000.0;
 /// so that the sequences are deterministic but uncorrelated.
 const BASE_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
 
-/// Compute the number of pulses to pack into a `VN_SEQ_LEN`-sample
-/// window for the given normalised density (0..1).
+/// 48 kHz form, used by tests to exercise the rate-aware function
+/// at the reference rate.
+#[cfg(test)]
 #[inline]
 fn pulses_for_density(density: f64) -> usize {
+    pulses_for_density_at_rate(density, REFERENCE_SR)
+}
+
+/// Same as `pulses_for_density`, but the pulse count is scaled to
+/// an arbitrary sample rate instead of always using the 48 kHz
+/// reference. At 48 kHz the result is identical to the original.
+#[inline]
+fn pulses_for_density_at_rate(density: f64, sample_rate: f64) -> usize {
     let d = density.clamp(0.0, 1.0);
     let pps = MIN_PULSES_PER_SEC + (MAX_PULSES_PER_SEC - MIN_PULSES_PER_SEC) * d;
-    let count = (pps * VN_SEQ_LEN as f64 / REFERENCE_SR).round() as usize;
-    // Safety floor: at least 8 pulses so the sequence is never silent.
+    let count = (pps * VN_SEQ_LEN as f64 / sample_rate).round() as usize;
     count.max(8)
+}
+
+#[test]
+fn pulses_for_density_is_monotonic() {
+    let mut prev = 0;
+    for i in 0..VN_DENSITY_STEPS {
+        let d = i as f64 / (VN_DENSITY_STEPS - 1) as f64;
+        let n = pulses_for_density_at_rate(d, REFERENCE_SR);
+        assert!(n >= prev, "pulse count decreased at step {}", i);
+        prev = n;
+    }
 }
 
 #[inline]
@@ -156,16 +175,20 @@ pub struct VelvetNoiseFilter {
     dry_gain: f64,
     wet_gain: f64,
 
-    // ---- Recursive Running-Sum (Dark Velvet Noise) -----------------
-    /// Current pulse width in samples. 1 = no darkening (impulse
-    /// pulses), MAX_RRS_WIDTH = maximum darkening.
+    // --- rate-awareness state ---
+    /// Host sample rate the sequences and LP coefficient are tuned to.
+    sample_rate: f64,
+    /// Base seed, so the sequences can be rebuilt on a rate change.
+    base_seed: u64,
+    /// Last value passed to `set_tone`, so the RRS width can be
+    /// recomputed after a rate change without losing the user setting.
+    tone: f64,
+    /// = MAX_RRS_WIDTH scaled to the current sample rate.
+    max_rrs_width: usize,
+
     rrs_width: usize,
-    /// Circular buffer of the last `rrs_width` samples fed into the
-    /// RRS stage. Fixed capacity `MAX_RRS_WIDTH`.
     rrs_buf: Vec<f64>,
-    /// Next write position in `rrs_buf`.
     rrs_idx: usize,
-    /// Running sum of the samples currently in `rrs_buf`.
     rrs_sum: f64,
 
     lp_state: f64,
@@ -173,38 +196,37 @@ pub struct VelvetNoiseFilter {
 }
 
 impl VelvetNoiseFilter {
-    /// Create a filter with the default seed. Equivalent to
-    /// `with_seed(BASE_SEED)`. Used for tests and any call site that
-    /// does not care about decorrelation.
+    /// Default instance at the 48 kHz reference rate.
     pub fn new() -> Self {
         Self::with_seed(BASE_SEED)
     }
 
-    /// Create a filter with a specific base seed.
-    ///
-    /// Each of the `VN_DENSITY_STEPS` internal sequences uses
-    /// `base_seed.wrapping_add(i)`, so two filters created with
-    /// **different base seeds** produce **completely uncorrelated**
-    /// VN patterns across their full density range. Use this to
-    /// decorrelate the left and right channels and to make the input
-    /// and output diffusers of one channel independent.
+    /// 48 kHz instance with a specific base seed.
     pub fn with_seed(base_seed: u64) -> Self {
+        Self::with_seed_and_rate(base_seed, REFERENCE_SR)
+    }
+
+    /// Instance with a specific base seed and sample rate.
+    ///
+    /// Pulse count per sequence, the one-pole LP coefficient, and
+    /// the maximum RRS width are all scaled to `sample_rate`, so the
+    /// diffusion sounds the same at 44.1, 48, 88.2, 96 kHz, etc.
+    pub fn with_seed_and_rate(base_seed: u64, sample_rate: f64) -> Self {
+        let sr = sample_rate.max(8000.0);
+        let max_rrs_width = ((MAX_RRS_WIDTH as f64) * sr / REFERENCE_SR)
+            .round()
+            .max(1.0) as usize;
+
         let mut sequences = Vec::with_capacity(VN_DENSITY_STEPS);
         for i in 0..VN_DENSITY_STEPS {
             let d = i as f64 / (VN_DENSITY_STEPS - 1) as f64;
-            let pulse_count = pulses_for_density(d);
+            let pulse_count = pulses_for_density_at_rate(d, sr);
             let seed = base_seed.wrapping_add(i as u64);
             sequences.push(Sequence::new(pulse_count, seed));
         }
 
-        // One-pole low-pass at ~5 kHz. The VN diffusion character
-        // lives mostly below 4 kHz; anything above is perceived as
-        // harshness, not diffusion.
-        // 3.5 kHz: below the sibilance band, which is where the harsh
-        // peak of an unfiltered VN signal sits. The diffusion character
-        // of VN lives below 3 kHz; anything above is perceived as
-        // harshness, not diffusion.
-        let lp_coeff = 1.0 - (-2.0 * std::f64::consts::PI * 3500.0 / 48_000.0).exp();
+        // One-pole LP at a true 3.5 kHz regardless of sample rate.
+        let lp_coeff = 1.0 - (-2.0 * std::f64::consts::PI * 3500.0 / sr).exp();
 
         Self {
             sequences,
@@ -216,15 +238,55 @@ impl VelvetNoiseFilter {
             amount: 0.0,
             dry_gain: 1.0,
             wet_gain: 0.0,
-            // Start with no darkening: RRS width = 1 is a pass-through.
+            sample_rate: sr,
+            base_seed,
+            tone: 0.0,
+            max_rrs_width,
             rrs_width: 1,
-            rrs_buf: vec![0.0; MAX_RRS_WIDTH],
+            rrs_buf: vec![0.0; max_rrs_width],
             rrs_idx: 0,
             rrs_sum: 0.0,
             lp_state: 0.0,
             lp_coeff,
         }
     }
+
+    /// Rebuild every rate-dependent internal value when the host
+    /// sample rate changes.
+    ///
+    /// Without this, the "3.5 kHz" LP would become 7 kHz at 96 kHz,
+    /// the RRS window would represent half the time in milliseconds,
+    /// and the pulse-density mapping would drift from the calibrated
+    /// 1500–3000 pps range.
+    pub fn set_sample_rate(&mut self, sample_rate: f64) {
+        let sr = sample_rate.max(8000.0);
+        if (sr - self.sample_rate).abs() < 1.0 {
+            return;
+        }
+        self.sample_rate = sr;
+
+        self.max_rrs_width = ((MAX_RRS_WIDTH as f64) * sr / REFERENCE_SR)
+            .round()
+            .max(1.0) as usize;
+        self.rrs_buf = vec![0.0; self.max_rrs_width];
+        self.rrs_idx = 0;
+        self.rrs_sum = 0.0;
+
+        self.lp_coeff = 1.0 - (-2.0 * std::f64::consts::PI * 3500.0 / sr).exp();
+
+        for (i, seq) in self.sequences.iter_mut().enumerate() {
+            let d = i as f64 / (VN_DENSITY_STEPS - 1) as f64;
+            let pulse_count = pulses_for_density_at_rate(d, sr);
+            let seed = self.base_seed.wrapping_add(i as u64);
+            *seq = Sequence::new(pulse_count, seed);
+        }
+
+        // Preserve the user's tone setting, re-derived at the new
+        // rate so the window duration in milliseconds stays the same.
+        let w = 1.0 + self.tone * (self.max_rrs_width as f64 - 1.0);
+        self.rrs_width = w.round().max(1.0) as usize;
+    }
+
 
     #[inline]
     pub fn set_amount(&mut self, amount: f64) {
@@ -261,14 +323,13 @@ impl VelvetNoiseFilter {
     #[inline]
     pub fn set_tone(&mut self, tone: f64) {
         let t = tone.clamp(0.0, 1.0);
-        // Linear interpolation between 1 and MAX_RRS_WIDTH.
-        let w = 1.0 + t * (MAX_RRS_WIDTH as f64 - 1.0);
-        let new_width = w.round() as usize;
+        // Stored so `set_sample_rate` can rebuild the width at the
+        // new rate without losing the user's setting.
+        self.tone = t;
+        let w = 1.0 + t * (self.max_rrs_width as f64 - 1.0);
+        let new_width = w.round().max(1.0) as usize;
         if new_width != self.rrs_width {
             self.rrs_width = new_width;
-            // Clear the RRS buffer on width change to prevent the
-            // window from containing samples that belong to two
-            // different widths (which would create a small transient).
             self.rrs_buf.fill(0.0);
             self.rrs_idx = 0;
             self.rrs_sum = 0.0;

@@ -179,10 +179,11 @@ impl ReverbChannel {
             ChannelLR::Right => SEED_RIGHT,
         };
 
-        let mut velvet_in = VelvetNoiseFilter::with_seed(channel_seed);
+        let mut velvet_in = VelvetNoiseFilter::with_seed_and_rate(channel_seed, sr);
         velvet_in.set_density(0.35);
-
-        let mut velvet_out = VelvetNoiseFilter::with_seed(channel_seed ^ VN_OUT_XOR);
+        
+        let mut velvet_out =
+            VelvetNoiseFilter::with_seed_and_rate(channel_seed ^ VN_OUT_XOR, sr);
         velvet_out.set_density(0.65);
 
         let mut ch = Self {
@@ -238,6 +239,10 @@ impl ReverbChannel {
         for line in &mut self.lines {
             line.set_samplerate(self.samplerate);
         }
+        // VN filters scale their sequences, LP coefficient, and RRS
+        // window to the new rate.
+        self.velvet_in.set_sample_rate(self.samplerate);
+        self.velvet_out.set_sample_rate(self.samplerate);
         // Re-apply sample-rate dependent parameters (matches the C++ `SetSamplerate`).
         self.set_parameter(P_PREDELAY, self.parameters[P_PREDELAY]);
         self.set_parameter(P_TAP_LENGTH, self.parameters[P_TAP_LENGTH]);

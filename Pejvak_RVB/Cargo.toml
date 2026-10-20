@@ -1,8 +1,8 @@
 [package]
 name = "Pejvak_RVB"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
-authors = ["Amin Yousefinejad <info@pejvakdsp.com>"]
+authors = ["Amin Yousefinejad"]
 description = "PEJVAK RVB – Hybrid Algorithmic Reverb VST3/CLAP"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/Pejvak-DSP/PejvakRVB"

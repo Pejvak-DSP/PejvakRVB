@@ -263,7 +263,7 @@ struct UndoSnapshot {
     texture_enabled: [bool; 6],
     ffdn: [f32; 37],
     illusion: [f32; 8],
-    chime_enabled: bool,
+    illusion_enabled: bool,
     eq_enabled: bool,
     bypass: bool,
     freeze: bool,
@@ -428,7 +428,7 @@ fn capture_undo_snapshot(p: &PejvakRvbParams, preset_name: &str, page: EditorPag
         texture_enabled,
         ffdn,
         illusion,
-        chime_enabled: p.illusion.enabled.value(),
+        illusion_enabled: p.illusion.enabled.value(),
         eq_enabled: p.eq.enabled.value(),
         bypass: p.global.bypass.value(),
         freeze: p.global.freeze.value(),
@@ -450,8 +450,17 @@ fn capture_undo_snapshot(p: &PejvakRvbParams, preset_name: &str, page: EditorPag
 /// the reverb tail. Undo/redo should be a smooth transition, not a
 /// hard cut.
 fn apply_undo_snapshot(p: &Arc<PejvakRvbParams>, s: &ParamSetter, snap: &UndoSnapshot) -> String {
-    p.reset_requested
-        .store(true, std::sync::atomic::Ordering::Relaxed);
+    // Deliberately do NOT set `reset_requested` here.
+    //
+    // The DSP reset clears every internal buffer (reverb tail,
+    // delay lines, feedback loops). Doing that on every undo /
+    // redo would cut the tail, which defeats the purpose of undo
+    // as a smooth step back through parameter history.
+    //
+    // Until per-sample automation smoothing is in place, large
+    // parameter jumps may produce a brief click. That is
+    // preferable to destroying the tail on every undo. Once the
+    // smoothing stage lands, this comment can be removed.
 
     for i in 0..49 {
         set_one(p, s, i, snap.cloudseed[i]);
@@ -472,7 +481,7 @@ fn apply_undo_snapshot(p: &Arc<PejvakRvbParams>, s: &ParamSetter, snap: &UndoSna
     apply_ffdn_params(p, s, &ffdn_opts);
 
     // ILLUSION: always "seen", so every field is pushed.
-    apply_chime_params(p, s, &snap.illusion, Some(snap.chime_enabled), true);
+    apply_illusion_params(p, s, &snap.illusion, Some(snap.illusion_enabled), true);
 
     // Master EQ switch.
     apply_eq_master(p, s, snap.eq_enabled);
@@ -539,7 +548,7 @@ fn snapshots_differ(a: &UndoSnapshot, b: &UndoSnapshot, eps: f32) -> bool {
     // their own — they are a context switch, like the engine
     // selector. The page is still captured in the snapshot so that
     // undo restores the page the change was made on.
-    a.chime_enabled != b.chime_enabled
+    a.illusion_enabled != b.illusion_enabled
         || a.eq_enabled != b.eq_enabled
         || a.bypass != b.bypass
         || a.freeze != b.freeze
@@ -694,18 +703,18 @@ const TEXTURE_ENABLED_NAMES: [&str; 6] = [
     "BloomEnabled",
 ];
 
-const CHIME_PARAM_NAMES: [&str; 8] = [
-    "ChimeSpark",
-    "ChimeStill",
-    "ChimeAura",
-    "ChimeVeil",
-    "ChimeWide",
-    "ChimeTint",
-    "ChimeRate",
-    "ChimeGrain",
+const ILLUSION_PARAM_NAMES: [&str; 8] = [
+    "IllusionSpark",
+    "IllusionStill",
+    "IllusionAura",
+    "IllusionVeil",
+    "IllusionWide",
+    "IllusionTint",
+    "IllusionRate",
+    "IllusionGrain",
 ];
 
-const CHIME_ENABLED_NAME: &str = "ChimeEnabled";
+const ILLUSION_ENABLED_NAME: &str = "IllusionEnabled";
 
 /// Names of the 30 FFDN parameters, in the same order as the
 /// `FfdnParams` struct fields. Used for XML serialisation inside the
@@ -977,13 +986,13 @@ fn params_to_xml(p: &PejvakRvbParams) -> String {
     s.push_str("  </FFDN>\n");
 
     // ---- ILLUSION section ----------------------------------------------
-    s.push_str("  <Chime>\n");
-    let chime_on = if p.illusion.enabled.value() { 1.0 } else { 0.0 };
+    s.push_str("  <Illusion>\n");
+    let illusion_on = if p.illusion.enabled.value() { 1.0 } else { 0.0 };
     s.push_str(&format!(
         "    <PARAM id=\"{}\" value=\"{:.6}\"/>\n",
-        CHIME_ENABLED_NAME, chime_on
+        ILLUSION_ENABLED_NAME, illusion_on
     ));
-    let chime_vals: [f32; 8] = [
+    let illusion_vals: [f32; 8] = [
         p.illusion.spark.value(),
         p.illusion.still.value(),
         p.illusion.aura.value(),
@@ -993,13 +1002,13 @@ fn params_to_xml(p: &PejvakRvbParams) -> String {
         p.illusion.rate.value(),
         p.illusion.grain.value(),
     ];
-    for (i, name) in CHIME_PARAM_NAMES.iter().enumerate() {
+    for (i, name) in ILLUSION_PARAM_NAMES.iter().enumerate() {
         s.push_str(&format!(
             "    <PARAM id=\"{}\" value=\"{:.6}\"/>\n",
-            name, chime_vals[i]
+            name, illusion_vals[i]
         ));
     }
-    s.push_str("  </Chime>\n");
+    s.push_str("  </Illusion>\n");
 
     s.push_str("  <TextureRack>\n");
 
@@ -1049,16 +1058,20 @@ fn params_to_xml(p: &PejvakRvbParams) -> String {
 }
 
 struct ParsedPreset {
-    cloudseed: [f32; 49],
-    cs_seen: [bool; 49],
+    /// Each CloudSeed slot is optional. Slots that were not present in
+    /// the XML file are `None` and are left untouched by
+    /// `apply_cloudseed_partial`, allowing partial presets (files
+    /// that contain only a subset of the 49 parameters) to be loaded
+    /// non-destructively — same pattern as `ffdn` and `illusion`.
+    cloudseed: [Option<f32>; 49],
     texture: [f32; 32],
     enabled: [bool; 6],
     texture_order: Option<[usize; 6]>,
     eq_enabled: Option<bool>,
     ffdn: [Option<f32>; 37],
     illusion: [f32; 8],
-    chime_enabled: Option<bool>,
-    chime_seen: bool,
+    illusion_enabled: Option<bool>,
+    illusion_seen: bool,
 }
 
 fn for_each_param(content: &str, mut f: impl FnMut(&str, f32)) {
@@ -1085,16 +1098,15 @@ fn for_each_param(content: &str, mut f: impl FnMut(&str, f32)) {
 fn xml_to_params(path: &Path) -> Option<ParsedPreset> {
     let content = std::fs::read_to_string(path).ok()?;
     let mut data = ParsedPreset {
-        cloudseed: [0.0; 49],
-        cs_seen: [false; 49],
+        cloudseed: [None; 49],
         texture: [0.0; 32],
         enabled: [false; 6],
         texture_order: None,
         eq_enabled: None,
         ffdn: [None; 37],
         illusion: [0.0; 8],
-        chime_enabled: None,
-        chime_seen: false,
+        illusion_enabled: None,
+        illusion_seen: false,
     };
 
     // ---- Section extraction -----------------------------------------
@@ -1134,11 +1146,11 @@ fn xml_to_params(path: &Path) -> Option<ParsedPreset> {
         None => "",
     };
 
-    // ---- <Chime> block ----------------------------------------------
-    let chime_section: &str = match content.find("<Chime>") {
-        Some(s) => match content[s..].find("</Chime>") {
+    // ---- <Illusion> block ----------------------------------------------
+    let illusion_section: &str = match content.find("<Illusion>") {
+        Some(s) => match content[s..].find("</Illusion>") {
             Some(e_rel) => {
-                let e = s + e_rel + "</Chime>".len();
+                let e = s + e_rel + "</Illusion>".len();
                 &content[s..e]
             }
             None => "",
@@ -1146,16 +1158,16 @@ fn xml_to_params(path: &Path) -> Option<ParsedPreset> {
         None => "",
     };
 
-    if !chime_section.is_empty() {
-        for_each_param(chime_section, |id, v| {
-            if id == CHIME_ENABLED_NAME {
-                data.chime_enabled = Some(v >= 0.5);
-                data.chime_seen = true;
+    if !illusion_section.is_empty() {
+        for_each_param(illusion_section, |id, v| {
+            if id == ILLUSION_ENABLED_NAME {
+                data.illusion_enabled = Some(v >= 0.5);
+                data.illusion_seen = true;
                 return;
             }
-            if let Some(idx) = CHIME_PARAM_NAMES.iter().position(|&n| n == id) {
+            if let Some(idx) = ILLUSION_PARAM_NAMES.iter().position(|&n| n == id) {
                 data.illusion[idx] = v.clamp(0.0, 1.0);
-                data.chime_seen = true;
+                data.illusion_seen = true;
             }
         });
     }
@@ -1176,8 +1188,7 @@ fn xml_to_params(path: &Path) -> Option<ParsedPreset> {
         }
         if let Some(p) = fdn_reverb_core::cloudseed::Parameter::from_name(id) {
             let idx = p.index();
-            data.cloudseed[idx] = denormalize(idx, v);
-            data.cs_seen[idx] = true;
+            data.cloudseed[idx] = Some(denormalize(idx, v));
         }
     });
 
@@ -1205,7 +1216,25 @@ fn xml_to_params(path: &Path) -> Option<ParsedPreset> {
     // parsed separately by a dedicated function.
     data.texture_order = parse_texture_order(texture_section);
 
-    if data.cs_seen.iter().all(|&b| b) {
+    // Accept any file that contained at least one meaningful value.
+    //
+    // Previously this required all 49 CloudSeed parameters to be
+    // present, which rejected valid partial presets (files containing
+    // only FFDN, only Illusion, only a subset of CloudSeed, etc.).
+    // Now that `cloudseed` is `[Option<f32>; 49]`, partial files are
+    // supported — but a completely empty `<CloudReverb></CloudReverb>`
+    // (or a file whose only content failed to parse) would silently
+    // reset the plugin state. The `any_param_seen` check below rejects
+    // that case.
+    let any_param_seen = data.cloudseed.iter().any(|x| x.is_some())
+        || data.ffdn.iter().any(|x| x.is_some())
+        || data.illusion_seen
+        || data.eq_enabled.is_some()
+        || data.texture_order.is_some()
+        || data.enabled.iter().any(|&b| b)
+        || data.texture.iter().any(|&v| v != 0.0);
+
+    if any_param_seen {
         Some(data)
     } else {
         None
@@ -1380,10 +1409,10 @@ fn apply_ffdn_params(p: &Arc<PejvakRvbParams>, s: &ParamSetter, params: &[Option
 
 /// Applies the ILLUSION parameters parsed from an XML preset.
 ///
-/// Only called when the `<Chime>` block was actually present in the
+/// Only called when the `<Illusion>` block was actually present in the
 /// file. Legacy XMLs predating  will not touch the ILLUSION
 /// parameters at all, preserving the user's current state.
-fn apply_chime_params(
+fn apply_illusion_params(
     p: &Arc<PejvakRvbParams>,
     s: &ParamSetter,
     illusion: &[f32; 8],
@@ -1446,7 +1475,7 @@ pub struct Theme {
     pub tex_crystal: Color32,
     pub tex_scatter: Color32,
     pub tex_bloom: Color32,
-    pub tex_chime: Color32,
+    pub tex_illusion: Color32,
     pub velvet: Color32,
     pub early_diffusion: Color32,
     pub late_diffusion: Color32,
@@ -1486,7 +1515,7 @@ impl Theme {
             tex_scatter: Color32::from_rgb(0xFF, 0x8A, 0x65),
             tex_bloom: Color32::from_rgb(0xBA, 0x68, 0xC8),
             // Icy white — a cool near-white with a faint blue cast.
-            tex_chime: Color32::from_rgb(0xE6, 0xF2, 0xFF),
+            tex_illusion: Color32::from_rgb(0xE6, 0xF2, 0xFF),
             velvet: Color32::from_rgb(0xB0, 0x8A, 0xE8),
             numbox_bg: Color32::from_rgb(0x0D, 0x12, 0x23),
             led_ring: Color32::from_rgb(0x08, 0x0B, 0x14),
@@ -1522,7 +1551,7 @@ impl Theme {
             tex_crystal: Color32::from_rgb(0x15, 0x65, 0xC0),
             tex_scatter: Color32::from_rgb(0xD8, 0x43, 0x15),
             tex_bloom: Color32::from_rgb(0x6A, 0x1B, 0x9A),
-            tex_chime: Color32::from_rgb(0x16, 0x2B, 0x5A),
+            tex_illusion: Color32::from_rgb(0x16, 0x2B, 0x5A),
             velvet: Color32::from_rgb(0x6E, 0x46, 0xA8),
             numbox_bg: Color32::from_rgb(0xC8, 0xCC, 0xD2),
             led_ring: Color32::from_rgb(0xB4, 0xB9, 0xC1),
@@ -1581,7 +1610,7 @@ impl Theme {
             tex_crystal,
             tex_scatter,
             tex_bloom,
-            tex_chime,
+            tex_illusion,
             velvet,
             numbox_bg,
             led_ring,
@@ -1622,7 +1651,7 @@ impl Theme {
             tex_crystal: grey,
             tex_scatter: grey,
             tex_bloom: grey,
-            tex_chime: grey,
+            tex_illusion: grey,
             velvet: grey,
             numbox_bg: self.numbox_bg,
             led_ring: self.led_ring,
@@ -1636,16 +1665,22 @@ impl Theme {
 // ============================================================================
 
 pub fn create_editor(params: Arc<PejvakRvbParams>) -> Option<EguiEditor<PejvakEguiApp>> {
-    // Read the current engine from the parameter set, so a fresh
-    // editor opens showing the engine the host actually has
-    // selected (rather than always starting on CLOUD).
     let initial_engine = params.ffdn.use_ffdn.value();
+
+    // Read the persisted preset name so the browser label matches
+    // the host's restored state on the very first frame.
+    let initial_preset = params
+        .current_preset
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
 
     let app = PejvakEguiApp {
         params: params.clone(),
         gui_context: None,
-        current_preset: "Init".to_string(),
-        user_presets: user_preset_names(),
+        current_preset: initial_preset,
+        user_presets: Vec::new(),
+        user_presets_last_refresh: f64::NEG_INFINITY,
         current_page: EditorPage::Main,
         pending_page: None,
         page_fade: 1.0,
@@ -1832,7 +1867,7 @@ fn summarize_diff(a: &UndoSnapshot, b: &UndoSnapshot) -> String {
     // ILLUSION params.
     for i in 0..8 {
         if (a.illusion[i] - b.illusion[i]).abs() > 1.0e-3 {
-            parts.push(CHIME_PARAM_NAMES[i].to_string());
+            parts.push(ILLUSION_PARAM_NAMES[i].to_string());
         }
     }
 
@@ -1856,7 +1891,7 @@ fn summarize_diff(a: &UndoSnapshot, b: &UndoSnapshot) -> String {
     if a.eq_enabled != b.eq_enabled {
         parts.push("EQ".to_string());
     }
-    if a.chime_enabled != b.chime_enabled {
+    if a.illusion_enabled != b.illusion_enabled {
         parts.push("ILLUSION".to_string());
     }
     if a.texture_enabled != b.texture_enabled {
@@ -2855,6 +2890,9 @@ pub struct PejvakEguiApp {
     gui_context: Option<GuiContext>,
     current_preset: String,
     user_presets: Vec<String>,
+    /// Time of the last directory scan for user presets.
+    /// `NEG_INFINITY` forces a scan on the very first frame.
+    user_presets_last_refresh: f64,
     current_page: EditorPage,
     pending_page: Option<EditorPage>,
     page_fade: f32,
@@ -2907,6 +2945,14 @@ impl NiceEguiApp for PejvakEguiApp {
             None => return,
         };
         let setter = gui_ctx.param_setter();
+    
+        // Pull the persisted preset name if the host restored it
+        // (e.g. project load). Cheap no-op when nothing changed.
+        if let Ok(p) = self.params.current_preset.try_lock() {
+            if *p != self.current_preset {
+                self.current_preset = p.clone();
+            }
+        }
 
         // Cache the persisted "show pop-ups" flag in egui memory so the
         // `hover_tip` helper can read it without needing the params.
@@ -3003,7 +3049,18 @@ impl NiceEguiApp for PejvakEguiApp {
         self.text_edit_active = Self::read_text_edit_active(ui);
 
         self.poll_preset_dialog(&setter);
-        self.user_presets = user_preset_names();
+        
+        // Scan the user-preset directory at most every 0.5 s.
+        //
+        // Previously this ran on every frame, issuing a `read_dir` plus
+        // a `create_dir_all` to the OS on each UI tick. On slow disks
+        // (network drives, external HDDs) with many presets this caused
+        // visible UI stutter.
+        let now_for_presets = ui.input(|i| i.time);
+        if now_for_presets - self.user_presets_last_refresh > 0.5 {
+            self.user_presets = user_preset_names();
+            self.user_presets_last_refresh = now_for_presets;
+        }
 
         let is_light = self
             .params
@@ -3323,6 +3380,18 @@ impl NiceEguiApp for PejvakEguiApp {
             }
         }
         self.current_preset = current_preset;
+
+        // Push the (possibly updated) preset name back into the
+        // persisted slot so it survives a close/reopen of the editor
+        // and any host state save. Uses try_lock to keep the UI
+        // thread safe even if the host's state-save thread happens
+        // to hold the lock.
+        if let Ok(mut p) = self.params.current_preset.try_lock() {
+            if *p != self.current_preset {
+                *p = self.current_preset.clone();
+            }
+        }
+
         self.current_page = current_page;
         self.pending_page = pending_page;
     }
@@ -3331,46 +3400,44 @@ impl NiceEguiApp for PejvakEguiApp {
 impl PejvakEguiApp {
     fn poll_preset_dialog(&mut self, setter: &ParamSetter) {
         let mut st = pd_lock();
-
+        let mut touched_disk = false;
+    
         if let Some(path) = st.save_path.take() {
             let _ = std::fs::write(&path, params_to_xml(&self.params));
             if let Some(stem) = path.file_stem().and_then(|x| x.to_str()) {
                 self.current_preset = stem.to_string();
             }
+            touched_disk = true;
         }
-
+    
         if let Some(path) = st.load_path.take() {
             if let Some(parsed) = xml_to_params(&path) {
-                apply_preset(&self.params, setter, &parsed.cloudseed);
+                apply_cloudseed_partial(&self.params, setter, &parsed.cloudseed);
                 apply_texture_params(&self.params, setter, &parsed.texture, &parsed.enabled);
-                // Only restore the signal-chain order if the preset
-                // actually declared one. Legacy XMLs keep the current
-                // order.
                 if let Some(order) = parsed.texture_order {
                     apply_texture_order(&self.params, order);
                 }
-                // Same rule for the master EQ switch: legacy presets
-                // without the tag leave the current value untouched.
                 if let Some(eq) = parsed.eq_enabled {
                     apply_eq_master(&self.params, setter, eq);
                 }
-                // FFDN parameters — only the ones that were actually
-                // present in the XML are applied; the rest keep the
-                // user's current values. This is what makes loading a
-                // legacy preset (which only carried FfdnDiffusion)
-                // non-destructive.
                 apply_ffdn_params(&self.params, setter, &parsed.ffdn);
-                apply_chime_params(
+                apply_illusion_params(
                     &self.params,
                     setter,
                     &parsed.illusion,
-                    parsed.chime_enabled,
-                    parsed.chime_seen,
+                    parsed.illusion_enabled,
+                    parsed.illusion_seen,
                 );
                 if let Some(stem) = path.file_stem().and_then(|x| x.to_str()) {
                     self.current_preset = stem.to_string();
                 }
             }
+            touched_disk = true;
+        }
+    
+        // Runs for BOTH save and load — moved out of the load block.
+        if touched_disk {
+            self.user_presets_last_refresh = f64::NEG_INFINITY;
         }
     }
 
@@ -5542,7 +5609,7 @@ fn draw_texture_page(
         draw_texture_order_card(ui, p, t, scale);
 
         // ---------- Row 4: ILLUSION (full width) ----------
-        draw_chime_card(ui, p, s, t, scale);
+        draw_illusion_card(ui, p, s, t, scale);
     });
 }
 
@@ -5891,21 +5958,21 @@ fn draw_texture_order_card(ui: &mut Ui, p: &Arc<PejvakRvbParams>, t: &Theme, sca
     }
 }
 
-fn draw_chime_card(ui: &mut Ui, p: &Arc<PejvakRvbParams>, s: &ParamSetter, t: &Theme, scale: f32) {
-    let chime_on = p.illusion.enabled.value();
+fn draw_illusion_card(ui: &mut Ui, p: &Arc<PejvakRvbParams>, s: &ParamSetter, t: &Theme, scale: f32) {
+    let illusion_on = p.illusion.enabled.value();
 
     // Animate the accent colour so it greys out with the rest of the
     // card. Uses the same 0.25 s curve as `draw_card_h`, so the
     // accent and the card background always move in lockstep.
     let accent_anim =
         ui.ctx()
-            .animate_bool_with_time(egui::Id::new("chime_accent_fade"), chime_on, 0.25);
+            .animate_bool_with_time(egui::Id::new("illusion_accent_fade"), illusion_on, 0.25);
     let accent_grey = Color32::from_rgb(0x55, 0x58, 0x60);
-    let accent = lerp_color(accent_grey, t.tex_chime, accent_anim);
+    let accent = lerp_color(accent_grey, t.tex_illusion, accent_anim);
 
-    draw_card_h(ui, t, scale, chime_on, "illusion", 80.0, |ui, ct| {
+    draw_card_h(ui, t, scale, illusion_on, "illusion", 80.0, |ui, ct| {
         section_title_with_enabled_switch(ui, ct, "ILLUSION", accent, &p.illusion.enabled, s, scale);
-        ui.add_enabled_ui(chime_on, |ui| {
+        ui.add_enabled_ui(illusion_on, |ui| {
             // All eight ILLUSION knobs in a single row:
             //   Spark, Still, Aura, Veil, Wide, Tint, Rate, Grain.
             // 8 × 52 px + 7 gaps of 6 px = 458 px, which fits
@@ -6573,7 +6640,7 @@ fn preset_menu(
                 if let Some(dir) = user_presets_dir() {
                     let path = dir.join(format!("{}.xml", name));
                     if let Some(parsed) = xml_to_params(&path) {
-                        apply_preset(p, s, &parsed.cloudseed);
+                        apply_cloudseed_partial(p, s, &parsed.cloudseed);
                         apply_texture_params(p, s, &parsed.texture, &parsed.enabled);
                         if let Some(order) = parsed.texture_order {
                             apply_texture_order(p, order);
@@ -6581,15 +6648,13 @@ fn preset_menu(
                         if let Some(eq) = parsed.eq_enabled {
                             apply_eq_master(p, s, eq);
                         }
-                        // FFDN + Chime parameters — same treatment as
-                        // in `poll_preset_dialog`.
                         apply_ffdn_params(p, s, &parsed.ffdn);
-                        apply_chime_params(
+                        apply_illusion_params(
                             p,
                             s,
                             &parsed.illusion,
-                            parsed.chime_enabled,
-                            parsed.chime_seen,
+                            parsed.illusion_enabled,
+                            parsed.illusion_seen,
                         );
 
                         *current = name;
@@ -6742,6 +6807,32 @@ fn category_header(
     );
 }
 
+/// Applies a CloudSeed preset where each slot is optional.
+///
+/// Used when loading a user XML that may not contain every
+/// parameter (Known Issue #10 — partial presets). Slots that are
+/// `None` are left untouched, so the user's current value for that
+/// parameter is preserved. This is the same pattern used by
+/// `apply_ffdn_params` and `apply_illusion_params`.
+///
+/// Unlike undo/redo, loading a preset **does** reset the DSP core so
+/// the new reverb tail starts from silence rather than bleeding in
+/// from the previous preset.
+fn apply_cloudseed_partial(
+    p: &Arc<PejvakRvbParams>,
+    s: &ParamSetter,
+    values: &[Option<f32>; 49],
+) {
+    p.reset_requested
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+
+    for (i, v) in values.iter().enumerate() {
+        if let Some(v) = v {
+            set_one(p, s, i, *v);
+        }
+    }
+}
+
 fn apply_preset(p: &Arc<PejvakRvbParams>, s: &ParamSetter, values: &[f32; 49]) {
     // Signal the audio thread to clear the DSP engine's internal
     // buffers (reverb tail, delay lines, feedback loops) so the
@@ -6892,6 +6983,120 @@ fn set_one(p: &Arc<PejvakRvbParams>, s: &ParamSetter, i: usize, v: f32) {
     }
 }
 
+/// Resets every non-mix parameter of every Texture layer to its
+/// factory default, and clears `mix` / `enabled` to zero.
+///
+/// Called by `apply_factory_preset` *before* applying the preset's
+/// own texture settings. This makes every factory preset produce a
+/// complete, canonical state regardless of what the user was doing
+/// before — the fix for Known Issue #7.
+///
+/// `apply_texture_layer` overwrites `mix` and `enabled` for the
+/// layers the preset actually uses; the layers the preset does not
+/// touch stay at the defaults set here.
+fn reset_texture_extras(p: &Arc<PejvakRvbParams>, s: &ParamSetter) {
+    macro_rules! set_f {
+        ($param:expr, $val:expr) => {{
+            s.begin_set_parameter(&$param);
+            s.set_parameter_normalized(&$param, ($val as f32).clamp(0.0, 1.0));
+            s.end_set_parameter(&$param);
+        }};
+    }
+    macro_rules! set_b {
+        ($param:expr, $val:expr) => {{
+            s.begin_set_parameter(&$param);
+            s.set_parameter(&$param, $val);
+            s.end_set_parameter(&$param);
+        }};
+    }
+
+    // Shimmer
+    set_b!(p.shimmer.enabled, false);
+    set_f!(p.shimmer.mix, 0.0);
+    set_f!(p.shimmer.pitch, 1.0);
+    set_f!(p.shimmer.feedback, 0.6);
+    set_f!(p.shimmer.low_cut, 0.2);
+    set_f!(p.shimmer.high_cut, 0.6);
+
+    // Mist
+    set_b!(p.mist.enabled, false);
+    set_f!(p.mist.mix, 0.0);
+    set_f!(p.mist.hp, 0.1);
+    set_f!(p.mist.feedback, 0.5);
+    set_f!(p.mist.delay, 0.5);
+    set_f!(p.mist.rate, 0.25);
+
+    // Drift
+    set_b!(p.drift.enabled, false);
+    set_f!(p.drift.mix, 0.0);
+    set_f!(p.drift.feedback, 0.3);
+    set_f!(p.drift.delay, 0.5);
+    set_f!(p.drift.rate, 0.3);
+    set_f!(p.drift.depth, 1.0);
+
+    // Crystal
+    set_b!(p.crystal.enabled, false);
+    set_f!(p.crystal.mix, 0.0);
+    set_f!(p.crystal.size, 0.4);
+    set_f!(p.crystal.density, 0.5);
+    set_f!(p.crystal.feedback, 0.5);
+
+    // Scatter
+    set_b!(p.scatter.enabled, false);
+    set_f!(p.scatter.mix, 0.0);
+    set_f!(p.scatter.spread, 0.5);
+    set_f!(p.scatter.density, 0.5);
+    set_f!(p.scatter.speed, 0.5);
+    set_f!(p.scatter.feedback, 0.3);
+
+    // Bloom
+    set_b!(p.bloom.enabled, false);
+    set_f!(p.bloom.mix, 0.0);
+    set_f!(p.bloom.rise, 0.5);
+    set_f!(p.bloom.size, 0.5);
+    set_f!(p.bloom.feedback, 0.5);
+    set_f!(p.bloom.tone, 0.5);
+}
+
+/// Resets Velvet-Noise diffusion to neutral (`diffusion = 0` = off,
+/// `density = 0.5`, `tone = 0.5`). No factory preset currently
+/// defines Velvet, so resetting to neutral is the correct baseline.
+fn reset_velvet(p: &Arc<PejvakRvbParams>, s: &ParamSetter) {
+    macro_rules! set_f {
+        ($param:expr, $val:expr) => {{
+            s.begin_set_parameter(&$param);
+            s.set_parameter_normalized(&$param, ($val as f32).clamp(0.0, 1.0));
+            s.end_set_parameter(&$param);
+        }};
+    }
+    set_f!(p.velvet.diffusion, 0.0);
+    set_f!(p.velvet.density, 0.5);
+    set_f!(p.velvet.tone, 0.5);
+}
+
+/// Resets all 7 FFDN card master switches to `true`, so every FFDN
+/// card is active regardless of the preset's engine.
+///
+/// `apply_ffdn_config` (used for FFDN presets) also sets these to
+/// `true`; the reset here matters for CloudSeed presets, whose
+/// `apply_preset` does not touch FFDN parameters at all.
+fn reset_ffdn_card_masters(p: &Arc<PejvakRvbParams>, s: &ParamSetter) {
+    macro_rules! set_b {
+        ($param:expr) => {{
+            s.begin_set_parameter(&$param);
+            s.set_parameter(&$param, true);
+            s.end_set_parameter(&$param);
+        }};
+    }
+    set_b!(p.ffdn.space_enabled);
+    set_b!(p.ffdn.network_enabled);
+    set_b!(p.ffdn.character_enabled);
+    set_b!(p.ffdn.shelves_enabled);
+    set_b!(p.ffdn.modulation_enabled);
+    set_b!(p.ffdn.filter_enabled);
+    set_b!(p.ffdn.dynamics_enabled);
+}
+
 fn apply_factory_preset(
     p: &Arc<PejvakRvbParams>,
     s: &ParamSetter,
@@ -6905,7 +7110,27 @@ fn apply_factory_preset(
     s.set_parameter(&p.ffdn.use_ffdn, target_ffdn);
     s.end_set_parameter(&p.ffdn.use_ffdn);
 
-    // 2. Engine-specific parameters.
+    // 2. Reset all "extras" that factory presets do not specify.
+    //
+    // Factory presets define a complete, canonical state. Resetting
+    // the texture non-mix params, Velvet, the FFDN card masters, and
+    // the EQ master here makes the result of loading a factory preset
+    // independent of whatever the user was doing before — the fix
+    // for Known Issue #7.
+    //
+    //   * Texture non-mix (pitch/feedback/…) → layer defaults.
+    //   * Velvet (diffusion/density/tone) → neutral (off).
+    //   * FFDN card masters → all true.
+    //   * EQ master → true (so the preset's EQ params take effect).
+    //
+    // Workflow state (bypass, freeze, interp) and UI preferences
+    // (theme, show_popups, window size) are intentionally NOT reset.
+    reset_texture_extras(p, s);
+    reset_velvet(p, s);
+    reset_ffdn_card_masters(p, s);
+    apply_eq_master(p, s, true);
+
+    // 3. Engine-specific parameters.
     match preset.engine {
         FactoryEngine::CloudSeed => {
             const EXTREME_CAT: usize = 7;
@@ -6923,7 +7148,8 @@ fn apply_factory_preset(
         }
     }
 
-    // 3. Texture Rack (unchanged for both engines).
+    // 4. Texture Rack — apply the preset's mixes. Layers the preset
+    //    does not use stay at the reset defaults from step 2.
     let tex = preset.texture;
     apply_texture_layer(s, &p.shimmer.mix, &p.shimmer.enabled, tex.shimmer_mix);
     apply_texture_layer(s, &p.mist.mix, &p.mist.enabled, tex.mist_mix);
@@ -6932,10 +7158,10 @@ fn apply_factory_preset(
     apply_texture_layer(s, &p.scatter.mix, &p.scatter.enabled, tex.scatter_mix);
     apply_texture_layer(s, &p.bloom.mix, &p.bloom.enabled, tex.bloom_mix);
 
-    // 4. Illusion (ILLUSION).
-    apply_chime_config(p, s, &preset.illusion);
+    // 5. ILLUSION.
+    apply_illusion_config(p, s, &preset.illusion);
 
-    // 5. Reset the signal chain order to default.
+    // 6. Reset the signal chain order to default.
     apply_texture_order(p, [0, 1, 2, 3, 4, 5]);
 }
 
@@ -7004,10 +7230,10 @@ fn apply_ffdn_config(p: &Arc<PejvakRvbParams>, s: &ParamSetter, cfg: &crate::pre
 
 /// Applies an Illusion (ILLUSION) configuration. Presets whose `spark` is
 /// zero disable the layer entirely.
-fn apply_chime_config(
+fn apply_illusion_config(
     p: &Arc<PejvakRvbParams>,
     s: &ParamSetter,
-    cfg: &crate::presets::ChimeConfig,
+    cfg: &crate::presets::IllusionConfig,
 ) {
     let enabled = cfg.spark > 0.001;
 
@@ -9050,7 +9276,7 @@ fn draw_about_body(ui: &mut Ui, t: &Theme, body_col: Color32, scale: f32) {
         "• Velvet-Noise VFDN diffusion inside CloudSeed",
         "• Reorderable Texture Signal Chain (drag & drop)",
         "• 50-step Undo / Redo with parameter-name tooltips",
-        "• 96 factory presets across 16 categories",
+        "• 100 factory presets across 16 categories",
     ] {
         let _ = ui.label(egui::RichText::new(line).size(10.0 * scale).color(body_col));
     }
@@ -9064,7 +9290,7 @@ fn draw_about_body(ui: &mut Ui, t: &Theme, body_col: Color32, scale: f32) {
     );
     ui.add_space(2.0 * scale);
     let _ = ui.label(
-        egui::RichText::new("Rust  •  nice-plug 0.4.2  •  egui 0.36  •  wide 1.7")
+        egui::RichText::new("Rust  •  nice-plug 0.4.2  •  egui 0.36  •  wide 1.6")
             .size(10.0 * scale)
             .color(body_col),
     );

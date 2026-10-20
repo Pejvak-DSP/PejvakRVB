@@ -193,6 +193,15 @@ impl FfdnDelayLine {
         }
     }
 
+    /// Maximum delay this line can actually hold, in samples.
+    ///
+    /// Matches the clamp applied inside `set_delay` (buffer length
+    /// minus two samples for fractional-interpolation headroom).
+    #[inline]
+    pub fn max_delay_samples(&self) -> usize {
+        self.buffer.len().saturating_sub(2)
+    }
+
     /// Sets the master damping cutoff in Hz.
     pub fn set_damping_hz(&mut self, hz: f64, sample_rate: f64) {
         self.sample_rate = sample_rate;

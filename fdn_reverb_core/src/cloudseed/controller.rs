@@ -19,7 +19,7 @@ use crate::cloudseed::modulated_delay::ModulatedDelay;
 use crate::cloudseed::params::{scaled_parameter_value, PARAM_COUNT};
 use crate::cloudseed::reverb_channel::{ChannelLR, ReverbChannel};
 use crate::ffdn::FfdnCore;
-use crate::texture::illusion::Chime;
+use crate::texture::illusion::Illusion;
 use crate::texture::{TextureLayer, TextureRack};
 use wide::f64x4;
 
@@ -178,7 +178,7 @@ pub struct ReverbController {
     /// ILLUSION: pitched reverb sequencer. Runs *after* the Texture Rack
     /// on the wet signal, so it always sees the fully processed reverb
     /// texture. It is deliberately not part of the reorderable chain.
-    illusion: Chime,
+    illusion: Illusion,
 
     // ---- FFDN engine -------------------------------------------------
     /// The FFDN instance. Always allocated, even when the CloudSeed
@@ -291,7 +291,7 @@ impl ReverbController {
             stereo_width: 1.0,
             frozen: false,
             texture_rack,
-            illusion: Chime::new(samplerate as f64),
+            illusion: Illusion::new(samplerate as f64),
             ffdn,
             engine: ReverbEngine::CloudSeed,
             ffdn_buf_l: vec![0.0; BUFFER_SIZE],
@@ -1398,30 +1398,30 @@ impl ReverbController {
     // ILLUSION — granular cloud with pitched overtones
     // ============================================================
 
-    pub fn set_chime_spark(&mut self, v: f64) {
+    pub fn set_illusion_spark(&mut self, v: f64) {
         self.illusion.set_spark(v);
     }
-    pub fn set_chime_still(&mut self, v: f64) {
+    pub fn set_illusion_still(&mut self, v: f64) {
         self.illusion.set_still(v);
     }
     /// Sets AURA in semitones (-24..=+24). Values below |0.5| enable
     /// the internal deterministic sequence (unison mode).
-    pub fn set_chime_aura(&mut self, semitones: f64) {
+    pub fn set_illusion_aura(&mut self, semitones: f64) {
         self.illusion.set_aura_semitones(semitones);
     }
-    pub fn set_chime_veil(&mut self, v: f64) {
+    pub fn set_illusion_veil(&mut self, v: f64) {
         self.illusion.set_veil(v);
     }
-    pub fn set_chime_wide(&mut self, v: f64) {
+    pub fn set_illusion_wide(&mut self, v: f64) {
         self.illusion.set_wide(v);
     }
-    pub fn set_chime_tint(&mut self, v: f64) {
+    pub fn set_illusion_tint(&mut self, v: f64) {
         self.illusion.set_tint(v);
     }
-    pub fn set_chime_rate(&mut self, v: f64) {
+    pub fn set_illusion_rate(&mut self, v: f64) {
         self.illusion.set_rate_norm(v);
     }
-    pub fn set_chime_grain(&mut self, v: f64) {
+    pub fn set_illusion_grain(&mut self, v: f64) {
         self.illusion.set_grain_norm(v);
     }
 }

@@ -68,7 +68,7 @@ pub mod bloom;
 pub use bloom::Bloom;
 
 pub mod illusion;
-pub use illusion::Chime;
+pub use illusion::Illusion;
 
 impl TextureRack {
     /// Constructs the rack and its six layers.

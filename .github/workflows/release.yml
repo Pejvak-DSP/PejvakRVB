@@ -1,0 +1,235 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  # ==========================================================================
+  # Windows
+  # ==========================================================================
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-nice-plug
+        run: cargo install cargo-nice-plug --locked
+
+      - name: Build Plugin
+        run: cargo nice-plug bundle Pejvak_RVB --release
+
+      - name: Add Installer Script and Package
+        run: |
+          $bat_content = @"
+          @echo off
+          echo =====================================
+          echo  Installing PEJVAK RVB for Windows
+          echo =====================================
+          echo.
+          echo Removing Windows security block (Mark of the Web)...
+          powershell -Command "Get-ChildItem -Path .\* -Recurse | Unblock-File"
+
+          echo.
+          echo Copying plugins to system folders...
+          mkdir "C:\Program Files\Common Files\VST3\PEJVAK RVB" 2>nul
+          copy /Y "PEJVAK RVB.vst3" "C:\Program Files\Common Files\VST3\PEJVAK RVB\"
+          copy /Y "Pejvak_RVB.clap" "C:\Program Files\Common Files\CLAP\"
+
+          echo.
+          echo ✅ Installation Complete! Please restart your DAW.
+          pause
+          "@
+
+          $bat_content | Out-File -FilePath target\bundled\Install_Windows.bat -Encoding ASCII
+          Compress-Archive -Path target/bundled/* -DestinationPath PEJVAK_RVB_Windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-bundle
+          path: PEJVAK_RVB_Windows.zip
+
+  # ==========================================================================
+  # macOS (Universal Binary)
+  # ==========================================================================
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-nice-plug
+        run: cargo install cargo-nice-plug --locked
+
+      - name: Build for Apple Silicon
+        run: cargo nice-plug bundle Pejvak_RVB --release --target aarch64-apple-darwin
+
+      - name: Build for Intel
+        run: cargo nice-plug bundle Pejvak_RVB --release --target x86_64-apple-darwin
+
+      - name: Create Universal Binary and Strip
+        run: |
+          mkdir -p target/universal/release
+          lipo -create \
+            target/aarch64-apple-darwin/release/libPejvak_RVB.dylib \
+            target/x86_64-apple-darwin/release/libPejvak_RVB.dylib \
+            -output target/universal/release/libPejvak_RVB.dylib
+          strip -x target/universal/release/libPejvak_RVB.dylib
+
+      - name: Update Bundles with Universal Binary
+        run: |
+          BUNDLE_DIR="target/bundled"
+          find "$BUNDLE_DIR" -type f -path "*/Contents/MacOS/*" -exec cp target/universal/release/libPejvak_RVB.dylib {} \;
+          find "$BUNDLE_DIR" -type f -path "*/Contents/MacOS/*" -exec chmod +x {} \;
+
+      - name: Create Installer Script and Package
+        run: |
+          BUNDLE_DIR="target/bundled"
+          cd "$BUNDLE_DIR"
+
+          cat << 'EOF' > "Install PEJVAK RVB.command"
+          #!/bin/bash
+          echo "====================================="
+          echo " Installing PEJVAK RVB for macOS"
+          echo "====================================="
+
+          mkdir -p ~/Library/Audio/Plug-Ins/VST3
+          mkdir -p ~/Library/Audio/Plug-Ins/CLAP
+
+          echo "Copying VST3..."
+          cp -R "PEJVAK RVB.vst3" ~/Library/Audio/Plug-Ins/VST3/
+
+          echo "Copying CLAP..."
+          cp -R "Pejvak_RVB.clap" ~/Library/Audio/Plug-Ins/CLAP/
+
+          echo "Removing macOS quarantine attribute..."
+          xattr -cr ~/Library/Audio/Plug-Ins/VST3/"PEJVAK RVB.vst3"
+          xattr -cr ~/Library/Audio/Plug-Ins/CLAP/Pejvak_RVB.clap
+
+          echo ""
+          echo "✅ Installation Complete! Please restart your DAW."
+          read -p "Press Enter to exit..."
+          EOF
+
+          chmod +x "Install PEJVAK RVB.command"
+          zip -r ../../PEJVAK_RVB_macOS.zip *
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-bundle
+          path: PEJVAK_RVB_macOS.zip
+
+  # ==========================================================================
+  # Linux
+  # ==========================================================================
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev libxcursor-dev libxcb-dri2-0-dev \
+            libxcb-icccm4-dev libx11-xcb-dev mesa-common-dev \
+            libgl1-mesa-dev libglu1-mesa-dev libasound2-dev
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-nice-plug
+        run: cargo install cargo-nice-plug --locked
+
+      - name: Build Plugin
+        run: cargo nice-plug bundle Pejvak_RVB --release
+
+      - name: Package Plugins
+        run: |
+          cd target/bundled
+          tar -czvf ../../PEJVAK_RVB_Linux.tar.gz *
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-bundle
+          path: PEJVAK_RVB_Linux.tar.gz
+
+  # ==========================================================================
+  # Create GitHub Release (single, after all builds)
+  # ==========================================================================
+  release:
+    name: Create GitHub Release
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect release assets
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f \( -name "*.zip" -o -name "*.tar.gz" \) \
+            -exec cp {} release-assets/ \;
+          echo "=== Assets to upload ==="
+          ls -la release-assets/
+
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          if [ -f CHANGELOG.md ]; then
+            awk -v ver="## [$V]" '
+              index($0, ver) > 0 { found=1 }
+              found && /^## \[/ && index($0, ver) == 0 { exit }
+              found { print }
+            ' CHANGELOG.md > release-notes.md
+
+            if [ ! -s release-notes.md ]; then
+              echo "## What's Changed in $GITHUB_REF_NAME" > release-notes.md
+              git log --pretty=format:"* %s (%h)" -20 >> release-notes.md
+            fi
+          else
+            {
+              echo "## What's Changed in $GITHUB_REF_NAME"
+              git log --pretty=format:"* %s (%h)" -20
+            } > release-notes.md
+          fi
+          echo "=== Release notes ==="
+          cat release-notes.md
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "PEJVAK RVB ${{ github.ref_name }}"
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+          files: release-assets/*
+          generate_release_notes: false

@@ -73,7 +73,7 @@ impl Grain {
     };
 }
 
-pub struct Chime {
+pub struct Illusion {
     samplerate: f64,
 
     buf_l: Vec<f64>,
@@ -120,7 +120,7 @@ pub struct Chime {
     grain_norm: f64,
 }
 
-impl Chime {
+impl Illusion {
     pub fn new(samplerate: f64) -> Self {
         let buf_len = (BUF_SECS * samplerate).ceil() as usize;
 

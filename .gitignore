@@ -33,3 +33,7 @@ Desktop.ini
 .idea/
 *.iml
 .vs/
+# Repomix files (removed from repo, keep out of version control)
+repomix-output.xml
+repomix.config.json
+repomix-instruction.md

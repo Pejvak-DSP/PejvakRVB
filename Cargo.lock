@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "Pejvak_RVB"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "egui",
  "egui-baseview",
@@ -985,7 +985,7 @@ dependencies = [
 
 [[package]]
 name = "fdn_reverb_core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "wide",
 ]

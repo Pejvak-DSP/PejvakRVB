@@ -14,7 +14,7 @@ pub mod cloudseed;
 pub mod ffdn;
 pub mod texture;
 
-pub use texture::illusion::Chime;
+pub use texture::illusion::Illusion;
 
 pub use cloudseed::params::{scaled_parameter_value, Parameter, PARAM_COUNT};
 pub use cloudseed::{

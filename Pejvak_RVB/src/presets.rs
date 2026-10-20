@@ -1,6 +1,6 @@
 //! PEJVAK RVB – Factory Preset Library – GPL-3.0
 //!
-//! 96 presets across 16 categories, covering both the CloudSeed
+//! 100 presets across 16 categories, covering both the CloudSeed
 //! (legacy CloudReverb) and FFDN engines, plus creative Illusion /
 //! Shimmer presets that drive the Texture Rack.
 //!
@@ -177,7 +177,7 @@ impl TextureConfig {
 // ============================================================================
 
 #[derive(Clone, Copy)]
-pub struct ChimeConfig {
+pub struct IllusionConfig {
     pub spark: f32,
     pub still: f32,
     pub aura_norm: f32, // 0..1 → -24..+24 st
@@ -188,8 +188,8 @@ pub struct ChimeConfig {
     pub grain: f32,
 }
 
-impl ChimeConfig {
-    pub const OFF: ChimeConfig = ChimeConfig {
+impl IllusionConfig {
+    pub const OFF: IllusionConfig = IllusionConfig {
         spark: 0.0,
         still: 0.5,
         aura_norm: 0.5,
@@ -289,7 +289,7 @@ pub struct FactoryPreset {
     pub ffdn: FfdnConfig,
     pub texture: TextureConfig,
     /// Illusion (ILLUSION) configuration. `spark == 0.0` means disabled.
-    pub illusion: ChimeConfig,
+    pub illusion: IllusionConfig,
 }
 
 // ----------------------------------------------------------------------------
@@ -349,7 +349,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     // ======================================================================
     // AMBIENCE (0) — CloudSeed — 6 presets
@@ -366,7 +366,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Tape Room Glue",
@@ -380,7 +380,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "String Bed",
@@ -394,7 +394,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Guitar Body",
@@ -408,7 +408,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Stereo Enhancer",
@@ -422,7 +422,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Noir Space",
@@ -436,7 +436,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     // ======================================================================
     // ROOMS (1) — CloudSeed — 8 presets
@@ -453,7 +453,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Tight Drum Room",
@@ -467,7 +467,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Vocal Booth",
@@ -481,7 +481,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Live Room L",
@@ -495,7 +495,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Brick Room",
@@ -509,7 +509,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Concrete Garage",
@@ -523,7 +523,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Tiled Room",
@@ -537,7 +537,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Drum Hall",
@@ -551,7 +551,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     // ======================================================================
     // CHAMBERS (2) — CloudSeed — 7 presets
@@ -568,7 +568,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Vintage Echo Chamber",
@@ -582,7 +582,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Scoring Chamber",
@@ -596,7 +596,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Marble Chamber",
@@ -610,7 +610,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Chamber Pop Vocals",
@@ -624,7 +624,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Dense Diffusion Chamber",
@@ -638,7 +638,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Tube Chamber",
@@ -652,7 +652,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     // ======================================================================
     // PLATES (3) — CloudSeed — 7 presets
@@ -669,7 +669,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Vocal Plate Bright",
@@ -683,7 +683,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Drum Plate Dark",
@@ -697,7 +697,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Vocal Plate Warm",
@@ -711,7 +711,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Slap Plate",
@@ -725,7 +725,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Ambient Plate Sustain",
@@ -739,7 +739,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Steel Plate Metallic",
@@ -753,7 +753,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     // ======================================================================
     // HALLS (4) — CloudSeed — 8 presets
@@ -770,7 +770,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Musikverein Warm",
@@ -784,7 +784,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Recital Hall",
@@ -798,7 +798,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Bright Orchestral Hall",
@@ -812,7 +812,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Dark Symphonic Hall",
@@ -826,7 +826,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Golden Hall",
@@ -840,7 +840,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Chamber Hall",
@@ -854,7 +854,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Wide Opera Hall",
@@ -868,7 +868,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     // ======================================================================
     // CATHEDRAL (5) — CloudSeed — 6 presets
@@ -885,7 +885,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Endless Nave",
@@ -899,7 +899,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "St. Paul's Dome",
@@ -913,7 +913,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Underground Crypt",
@@ -927,7 +927,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Cloister",
@@ -941,7 +941,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Milan Duomo",
@@ -955,7 +955,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     // ======================================================================
     // TEXTURES (6) — CloudSeed + Texture Rack — 8 presets
@@ -972,7 +972,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.55, 0.0, 0.35, 0.0, 0.0, 0.0),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Ethereal Cloud",
@@ -986,7 +986,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.0, 0.45, 0.0, 0.30, 0.25, 0.35),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Crystal Cave",
@@ -1000,7 +1000,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.0, 0.0, 0.0, 0.55, 0.30, 0.0),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Ghost Choir",
@@ -1014,7 +1014,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.35, 0.0, 0.40, 0.0, 0.0, 0.45),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Frozen Glass",
@@ -1028,7 +1028,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.25, 0.35, 0.0, 0.40, 0.0, 0.0),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Velvet Drape",
@@ -1042,7 +1042,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.0, 0.55, 0.0, 0.0, 0.0, 0.0),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Slate Rain",
@@ -1056,7 +1056,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.0, 0.0, 0.0, 0.0, 0.45, 0.30),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Whisper Veil",
@@ -1070,7 +1070,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.0, 0.45, 0.35, 0.0, 0.0, 0.25),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     // ======================================================================
     // EXTREME (7) — CloudSeed — 6 presets
@@ -1087,7 +1087,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.0, 0.0, 0.0, 0.0, 0.0, 0.35),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Void",
@@ -1101,7 +1101,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.30, 0.40, 0.0, 0.0, 0.45, 0.0),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Reverse Bloom",
@@ -1115,7 +1115,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.0, 0.0, 0.0, 0.0, 0.0, 0.55),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Gated Bloom",
@@ -1129,7 +1129,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.0, 0.0, 0.0, 0.35, 0.40, 0.0),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Radio Static Hall",
@@ -1143,7 +1143,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.45, 0.0, 0.35, 0.0, 0.55, 0.0),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Time Smear",
@@ -1157,7 +1157,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.35, 0.30, 0.25, 0.25, 0.30, 0.35),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     // ======================================================================
     // FFDN SPACES (8) — FFDN — 6 presets
@@ -1181,7 +1181,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Studio Room",
@@ -1202,7 +1202,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Drum Room",
@@ -1223,7 +1223,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Vocal Booth",
@@ -1245,7 +1245,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Live Room",
@@ -1266,7 +1266,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Big Wood",
@@ -1287,7 +1287,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     // ======================================================================
     // FFDN HALLS (9) — FFDN — 6 presets
@@ -1311,7 +1311,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Symphony Hall",
@@ -1332,7 +1332,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Chamber Hall",
@@ -1353,7 +1353,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Cathedral Hall",
@@ -1374,7 +1374,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Ice Hall",
@@ -1395,7 +1395,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Subterranean",
@@ -1417,7 +1417,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     // ======================================================================
     // FFDN PLATES (10) — FFDN — 5 presets
@@ -1442,7 +1442,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Vintage Plate",
@@ -1464,7 +1464,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Steel Plate",
@@ -1486,7 +1486,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Vocal Plate",
@@ -1509,7 +1509,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Dense Plate",
@@ -1532,7 +1532,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     // ======================================================================
     // FFDN AMBIENT (11) — FFDN — 6 presets
@@ -1556,7 +1556,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::single(0.25, 0.0, 0.35, 0.0, 0.0, 0.30),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Drifting Pad",
@@ -1577,7 +1577,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::single(0.0, 0.45, 0.40, 0.0, 0.0, 0.0),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Deep Chasm",
@@ -1599,7 +1599,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::single(0.0, 0.30, 0.0, 0.0, 0.0, 0.35),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Glass Labyrinth",
@@ -1621,7 +1621,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::single(0.30, 0.0, 0.0, 0.40, 0.0, 0.0),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Nebula",
@@ -1642,7 +1642,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::single(0.0, 0.55, 0.30, 0.0, 0.0, 0.0),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Ice Cave",
@@ -1663,7 +1663,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::single(0.0, 0.0, 0.0, 0.35, 0.0, 0.0),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     // ======================================================================
     // FFDN CHARACTER (12) — FFDN — 5 presets
@@ -1689,7 +1689,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Tilted Hall",
@@ -1713,7 +1713,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Warm Cross",
@@ -1737,7 +1737,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Analog Plate",
@@ -1764,7 +1764,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Vintage Chamber",
@@ -1790,7 +1790,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     // ======================================================================
     // FFDN DYNAMIC (13) — FFDN — 4 presets
@@ -1815,7 +1815,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Ducked Vocal",
@@ -1837,7 +1837,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Gated Space",
@@ -1859,7 +1859,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "FFDN Pop Pad",
@@ -1882,7 +1882,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
             ..NO_FFDN
         },
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     // ======================================================================
     // ILLUSION (14) — ILLUSION + Texture — 6 presets
@@ -1899,7 +1899,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig {
+        illusion: IllusionConfig {
             spark: 0.55,
             still: 0.65,
             aura_norm: 0.5, // 0 st (internal sequence)
@@ -1922,7 +1922,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig {
+        illusion: IllusionConfig {
             spark: 0.65,
             still: 0.35,
             aura_norm: 0.5,
@@ -1945,7 +1945,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::NONE,
-        illusion: ChimeConfig {
+        illusion: IllusionConfig {
             spark: 0.45,
             still: 0.85,
             aura_norm: 0.4, // -4.8 st
@@ -1968,7 +1968,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.0, 0.0, 0.0, 0.0, 0.0, 0.40),
-        illusion: ChimeConfig {
+        illusion: IllusionConfig {
             spark: 0.50,
             still: 0.70,
             aura_norm: 0.58, // +3.8 st
@@ -1991,7 +1991,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.0, 0.0, 0.0, 0.45, 0.25, 0.0),
-        illusion: ChimeConfig {
+        illusion: IllusionConfig {
             spark: 0.60,
             still: 0.45,
             aura_norm: 0.60, // +4.8 st
@@ -2014,7 +2014,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.0, 0.50, 0.0, 0.0, 0.0, 0.25),
-        illusion: ChimeConfig {
+        illusion: IllusionConfig {
             spark: 0.40,
             still: 0.75,
             aura_norm: 0.5,
@@ -2040,7 +2040,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.60, 0.0, 0.0, 0.0, 0.0, 0.20),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Shimmer Rising",
@@ -2054,7 +2054,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.55, 0.0, 0.30, 0.0, 0.0, 0.45),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Shimmer Cathedral",
@@ -2068,7 +2068,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.55, 0.0, 0.0, 0.0, 0.0, 0.35),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Shimmer Void",
@@ -2082,7 +2082,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.55, 0.0, 0.0, 0.0, 0.35, 0.20),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
     FactoryPreset {
         name: "Shimmer Mist",
@@ -2096,7 +2096,7 @@ pub const FACTORY_PRESETS: &[FactoryPreset] = &[
         ],
         ffdn: NO_FFDN,
         texture: TextureConfig::single(0.50, 0.45, 0.0, 0.0, 0.0, 0.30),
-        illusion: ChimeConfig::OFF,
+        illusion: IllusionConfig::OFF,
     },
 ];
 

@@ -1,46 +1,63 @@
-***
-
-```markdown
 # Contributing to PEJVAK RVB
 
-First off, thank you for considering contributing to **PEJVAK RVB**! It's people like you that make open-source audio software such a powerful and inspiring community.
+First off, thank you for considering contributing to **PEJVAK RVB**! It's people like you who make open-source audio software such a powerful and inspiring community.
 
-This document outlines the guidelines for contributing to this project, whether it's reporting a bug, suggesting a new feature, or submitting a pull request.
+This document describes how to contribute, whether you are reporting a bug, suggesting a feature, or submitting a pull request.
+
+## Table of Contents
+
+- [Code of Conduct](#code-of-conduct)
+- [Reporting Bugs](#reporting-bugs)
+- [Suggesting Features](#suggesting-features)
+- [Development Setup](#development-setup)
+- [Strict Code Rules (Audio Thread Safety)](#strict-code-rules-audio-thread-safety)
+- [DSP-Specific Rules (Non-Negotiable)](#dsp-specific-rules-non-negotiable)
+- [Code Style](#code-style)
+- [Pull Request Process](#pull-request-process)
+- [Testing Checklist for PRs](#testing-checklist-for-prs)
+- [Known Issues](#known-issues)
+- [License](#license)
 
 ---
 
-## 📜 Code of Conduct
+## Code of Conduct
 
 By participating in this project, you are expected to uphold a welcoming, respectful, and harassment-free environment. We are all here to build great audio tools.
 
 ---
 
-## 🐛 Reporting Bugs
+## Reporting Bugs
 
-If you find a bug, please open an issue on our [GitHub Issues](https://github.com/Pejvak-DSP/PejvakRVB/issues) page. 
+If you find a bug, please open an issue on the [GitHub Issues](https://github.com/Pejvak-DSP/PejvakRVB/issues) page.
 
 To help us fix it quickly, please include:
-1. **Your Environment:** OS version (Windows/macOS/Linux), CPU architecture (x86_64 / Apple Silicon), and DAW name/version.
-2. **Plugin Version:** The exact version of PEJVAK RVB you are using (visible in the `☰ → About` menu).
-3. **Steps to Reproduce:** A clear, step-by-step description of how to make the bug happen.
-4. **Expected vs. Actual Behavior:** What you thought would happen versus what actually happened.
+
+1. **Environment:** OS version (Windows / macOS / Linux), CPU architecture (x86_64 / Apple Silicon), and DAW name and version.
+2. **Plugin version:** The exact version of PEJVAK RVB you are using (visible in the `☰ → About` menu).
+3. **Audio settings:** Sample rate (44.1 / 48 / 96 kHz) and buffer size (e.g. 128, 256, 512) at the time the bug occurred.
+4. **Steps to reproduce:** A clear, step-by-step description of how to trigger the bug.
+5. **Expected vs. actual behavior:** What you thought would happen versus what actually happened.
+6. **Screenshots / audio clips:** If applicable, attach a short audio sample demonstrating the issue. This is especially valuable for zipper, click, and tail bugs.
 
 ---
 
-## 💡 Suggesting Features
+## Suggesting Features
 
-We welcome feature requests! Before opening an issue, please check if a similar request already exists. 
-When suggesting a feature, explain *why* it would be useful, especially from a DSP, musical, or UI/UX perspective.
+We welcome feature requests! Before opening an issue, please check whether a similar request already exists.
+
+When suggesting a feature, explain *why* it would be useful, especially from a DSP, musical, or UI/UX perspective. Concrete examples (e.g. "this would let me do X in my mix") are far more valuable than abstract ideas.
 
 ---
 
-## 🛠️ Development Setup
+## Development Setup
 
 ### Prerequisites
-- **Rust 1.98+** (Install via [rustup](https://rustup.rs))
-- **Windows:** Visual Studio Build Tools (C++).
-- **macOS:** Xcode Command Line Tools (`xcode-select --install`).
+
+- **Rust 1.98+** (install via [rustup](https://rustup.rs))
+- **Windows:** Visual Studio Build Tools (C++ workload)
+- **macOS:** Xcode Command Line Tools (`xcode-select --install`)
 - **Linux:** X11 and OpenGL development libraries:
+
   ```bash
   sudo apt-get install -y libx11-dev libxcursor-dev libxcb-dri2-0-dev \
     libxcb-icccm4-dev libx11-xcb-dev mesa-common-dev \
@@ -48,70 +65,195 @@ When suggesting a feature, explain *why* it would be useful, especially from a D
   ```
 
 ### Building
-To build the plugin locally:
+
+Build the plugin bundle locally:
+
 ```bash
 cargo nice-plug bundle Pejvak_RVB --release
 ```
 
-To run the DSP tests:
+### Running the DSP tests
+
 ```bash
 cargo test -p fdn_reverb_core
 ```
 
 ---
 
-## ⚠️ Strict Code Rules (Audio Thread Safety)
+## Strict Code Rules (Audio Thread Safety)
 
-Audio programming is highly sensitive. A single allocation on the audio thread or a bad lock can cause dropouts or crashes in a DAW. **All Pull Requests must adhere to the following rules:**
+Audio programming is highly sensitive. A single allocation on the audio thread or a bad lock can cause dropouts or crashes in a DAW. **All pull requests must adhere to the following rules.**
 
 ### 1. Real-Time Safety (Zero Allocation)
-- **NEVER** allocate memory (`Vec::new`, `Box::new`, `String::from`, etc.) inside the `process()` function or any DSP function called within it.
+
+- **Never** allocate memory (`Vec::new`, `Box::new`, `String::from`, etc.) inside `process()` or any DSP function called from it.
 - If you need dynamic memory, pre-allocate it in `new()` or `activate()`.
-- Use fixed-size arrays (`[f64; 16]`) or pre-allocated buffers instead of `Vec` inside the audio hot path.
+- Use fixed-size arrays (e.g. `[f64; 16]`) or pre-allocated buffers instead of `Vec` in the audio hot path.
+- All `ctrl.set_*` calls (e.g. `set_parameter`, `set_ffdn_*`, `set_texture_parameter`, `set_illusion_*`) are made from inside `process_inner`, i.e. on the audio thread. **They must remain allocation-free.** `MatrixKind` is stored inline precisely so that `rebuild_matrix` can reassign it without touching the heap.
 
-### 2. Pure f64 Math
-- All DSP operations must be done in **`f64`** (double precision). 
-- `f32` should only be used at the very boundary (plugin input/output buffers).
-- **Never** use fast-math or approximate fast-trig functions unless they are tested and approved for this project.
+### 2. Pure `f64` Math
 
-### 3. No Locking in the Audio Thread
-- Never use `Mutex`, `RwLock`, or thread-blocking operations inside `process()`.
+- All DSP operations must be done in **`f64`** (double precision).
+- `f32` may only be used at the very boundary (plugin input/output buffers).
+- **Never** use fast-math or approximate fast-trig functions unless they have been tested and approved for this project.
+- **No FMA, no reassociation.** The `wide` SIMD crate is used only for element-wise mul/add on independent data, so that results stay bit-identical to scalar code.
+
+### 3. No Locking on the Audio Thread
+
+- Never use `Mutex`, `RwLock`, or any thread-blocking operation inside `process()`.
 - Use atomics (`AtomicBool`, `AtomicU64`) or lock-free structures for communication between the UI and the audio thread.
-- When interacting with `egui` memory, avoid nested locks (e.g., calling `ui.ctx().input()` inside `ui.memory_mut()`), as it can cause deadlocks.
+- When interacting with `egui` memory, avoid nested locks (e.g. calling `ui.ctx().input()` inside `ui.memory_mut()`), as this can deadlock. This is explicitly required by the TX kill switch (`pejvak_tx_kill_active` and `pejvak_force_undo_commit_at`).
 
 ### 4. Prevent Denormals
-- Ensure that recursive filters flush denormals (values below `1e-30` should be treated as `0.0`).
+
+- Recursive filters must flush denormals (values below `1e-30` are treated as `0.0`).
+- ILLUSION already does this (`flush_denorm`); any new recursive filter must do the same.
 
 ---
 
-## 🧹 Code Style
+## DSP-Specific Rules (Non-Negotiable)
+
+These rules are specific to this project and **must be preserved** by every PR. Each one was learned the hard way, usually after a bug that cost hours of debugging or shipped in a release.
+
+### Automation Smoothing (`SAMPLE_ACCURATE_AUTOMATION = false`)
+
+- `SAMPLE_ACCURATE_AUTOMATION` **must remain `false`** unless every `FloatParam` that feeds the DSP has `.with_smoother()` enabled **and** every path in `process_inner` reads `smoothed.next()` (per sample) or `smoothed.next_block()` (per sub-block).
+- With `SAMPLE_ACCURATE_AUTOMATION = true` and un-smoothed parameters, `nice-plug` splits the host buffer at every automation event. This produces a **vertical step** in the parameter value at each split point, which is heard as zipper noise.
+- This is the only viable fix for zipper noise in the current architecture. Adding per-sample smoothing manually inside `ReverbChannel` / `ReverbController` was tried; it was architecturally invasive and did not solve the actual problem, because the split points themselves were the source of the steps.
+
+### CloudSeed `apply_undo_snapshot`: Do **Not** Reset the DSP
+
+- `apply_undo_snapshot` in `editor.rs` must **never** set `reset_requested`. Undo/redo is a context switch between parameter states, not a preset load. Clearing the reverb tail on every undo is jarring and incorrect.
+- The comment in the function explains this. If you find a reason to change it, open a discussion first.
+
+### FFDN Delay Buffer Sizing
+
+- `SingleNetwork::new` computes `max_delay_samples = ceil(sample_rate × 0.5)`, i.e. a **500 ms** buffer at any sample rate. It used to be a hard-coded `24000`, which capped the usable Size range at 96 kHz.
+- `recompute_delays` **must** clamp the computed delay to `self.lines[i].max_delay_samples()` **before** storing it in `delays_samples`. `recompute_feedback` reads its delay time from `delays_samples`; if that value exceeds the buffer capacity, the audible decay becomes shorter than requested.
+
+### Velvet-Noise Filter: Rate-Aware Construction
+
+- `VelvetNoiseFilter` must be created with `with_seed_and_rate(seed, sample_rate)`, **not** `with_seed`. The rate-aware constructor scales the pulse count, the LP coefficient (a true 3.5 kHz at any rate), and the maximum RRS width to the current sample rate.
+- `ReverbChannel::set_samplerate` must call `velvet_in.set_sample_rate(sr)` and `velvet_out.set_sample_rate(sr)` so that host sample-rate changes rebuild the internal sequences.
+- `set_tone` must store `self.tone` so that `set_sample_rate` can recompute `rrs_width` without losing the user's setting.
+
+### FFDN Character: `velvet_saturate` Has No Makeup Gain
+
+- `velvet_saturate` uses `pre_gain = 1 + amount * 0.8` and **no makeup term**. The previous version had a `1 + 0.15·amount²` small-signal gain, which made any delay line with `g_mid > 0.87` unstable (e.g. `decay = 3 s`, `size ≈ 50 ms` gives `g_mid ≈ 0.89`). Removing the makeup restores unity small-signal gain; mid-level compression is exactly what a saturation stage should do.
+- If you reintroduce a makeup term, you **must** also clamp the effective loop gain and add a test like `drive_one_keeps_network_stable`.
+
+### FFDN Dynamics: Audibility
+
+These stages were specifically tuned so the user can actually hear them (previously they were nearly inaudible at any setting):
+
+- **Attack:** time uses `a.sqrt()` (not linear `a`) so the effect grows quickly with the amount knob. Attenuation is a **blend** between "no attenuation" (`1.0`) and "ratio attenuation" (`gain_follower / peak_follower`), driven by `amount`. This is what makes the stage audible at `amount = 0.5` and above.
+- **Ducking:** uses a dB-mapped exponential (`-24 × amount × env_norm`), **not** the linear `1 - amount × env` formula. The linear formula gave at most about -3 dB at `amount = 1`, which was imperceptible.
+- **Gate:** the threshold range is `[1e-3, 3.16e-1]` (-60 dBFS to -10 dBFS), **not** the old `[1e-4, 3e-2]` (-80 dBFS to -30 dBFS). The old maximum was below typical FFDN wet levels, so a gate at full amount never closed. The fade is **squared** (`(env / thr)²`), producing a decisive close instead of a slow fade.
+- All three stages remain **post-network** gain multipliers in `[0, 1]`. None of them can destabilize the FFDN.
+
+### Canonical Factory Presets
+
+- `apply_factory_preset` **must** call `reset_texture_extras`, `reset_velvet`, `reset_ffdn_card_masters`, and `apply_eq_master(true)` **before** applying the preset's own parameters.
+- This ensures every factory preset produces a complete, canonical state, independent of what the user was doing before. Without it, loading "Vocal Presence" would keep a Velvet diffusion value from the previous preset, which is surprising and produces inconsistent sounds.
+- Workflow state (bypass, freeze, interp, theme, show_popups, window size) is intentionally **not** reset. These are preferences, not preset state.
+
+### Partial XML Presets
+
+- `ParsedPreset.cloudseed` is `[Option<f32>; 49]`, **not** `[f32; 49]`. `cs_seen` was removed.
+- `xml_to_params` accepts a file if `any_param_seen` is true (at least one CloudSeed, FFDN, Illusion, EQ, Texture, or Order value was present). A completely empty `<CloudReverb></CloudReverb>` is still rejected.
+- Loading a preset from a file must use `apply_cloudseed_partial` (which skips `None` slots), **not** `apply_preset` (which writes all 49). `apply_preset` is still used for factory presets, which are always complete.
+
+### ILLUSION (formerly CHIME)
+
+- The file is `texture/illusion.rs`, the struct is `Illusion`, the params struct is `IllusionParams`, the XML tag for enable is `IllusionEnabled`, and the params array constant in `editor.rs` is `ILLUSION_PARAM_NAMES`. There is **no** `Chime*` reference in the current code.
+- `knob_row_compact` in `draw_illusion_card` uses `count = 8`, matching the 8 knobs. A mismatch shifts the row sideways.
+
+### Texture Rack: Anti-Click
+
+- Every layer uses `clear_buffers()` on a rising edge (`mix: 0 → >0`), **not** `reset_runtime_state()`. `reset_runtime_state` would leave stale audio in the internal buffers, which produces an audible click when the layer re-enables after a long bypass (e.g. TX kill).
+
+---
+
+## Code Style
 
 We enforce strict code quality to keep the project maintainable:
+
 - **Format:** Run `cargo fmt` before committing.
 - **Lints:** Run `cargo clippy -- -D warnings` and fix all warnings.
-- **Comments:** Write concise comments (1–3 lines). Avoid excessive or dead comments.
+- **Comments:** Keep comments concise (1–3 lines). Avoid excessive or dead comments. Never mention plugin version numbers inside code comments.
 - **Naming:** Follow standard Rust naming conventions.
+- **Param IDs vs. XML names:** For FFDN, `Saturation` / `SaturationEnabled` (param IDs in Rust) deliberately differ from `FfdnDrive` / `FfdnDriveEnabled` (XML names). **Do not** change either side; both are part of the automation and preset ABI.
+- **Plugin IDs:** `VST3_CLASS_ID` and `CLAP_ID` are **immutable**. Changing them breaks every saved project.
 
 ---
 
-## 🚀 Pull Request Process
+## Pull Request Process
 
-1. **Fork** the repository and create your branch from `main`:
+1. **Fork** the repository and create a branch from `main`:
+
    ```bash
    git checkout -b feature/my-new-feature
    ```
-2. Write your code, ensuring it follows the strict Real-Time rules above.
-3. **Add Tests:** If you modify DSP logic, add unit tests in the `#[cfg(test)]` module.
-4. Run `cargo fmt` and `cargo clippy`.
-5. Commit your changes with a descriptive message (e.g., `feat: add soft-clip to dynamics`, `fix: resolve TX switch crackle`).
-6. Push to your fork and submit a **Pull Request** to the `main` branch.
-7. Wait for a maintainer to review your code. We might ask for some changes before merging.
+
+2. Write your code, following the real-time and DSP-specific rules above.
+3. **Add tests.** If you modify DSP logic, add unit tests in the `#[cfg(test)]` module. Any change to `density`, `decorr`, `attack`, `ducking`, `gate`, `loop_hp`, `loop_lp`, `mid_focus`, `drive`, or `velvet_saturate` must ship with a `*_is_bit_identical` or `*_keeps_network_stable` test.
+4. Run `cargo fmt` and `cargo clippy -- -D warnings`.
+5. Run the full test suite:
+
+   ```bash
+   cargo test -p fdn_reverb_core
+   ```
+
+6. Commit your changes with a descriptive message, following a lightweight conventional style:
+
+   | Prefix      | Use for                                   |
+   | ----------- | ----------------------------------------- |
+   | `feat:`     | New features                              |
+   | `fix:`      | Bug fixes                                 |
+   | `refactor:` | Internal changes with no behavior change  |
+   | `docs:`     | Documentation                             |
+   | `test:`     | Test additions                            |
+
+7. Push to your fork and open a **pull request** against the `main` branch.
+8. Wait for a maintainer to review your code. We may ask for changes before merging.
 
 ---
 
-## 📄 License
+## Testing Checklist for PRs
+
+Before opening a PR, please verify:
+
+- [ ] `cargo test -p fdn_reverb_core` passes.
+- [ ] `cargo build -p Pejvak_RVB --release` succeeds.
+- [ ] `cargo clippy -- -D warnings` produces no warnings.
+- [ ] If you touched any DSP code: an `*_is_bit_identical` test proves that the neutral/default value is unchanged.
+- [ ] If you changed any parameter's default value: XML presets still round-trip correctly (save → load → compare).
+- [ ] If you touched the FFDN: `drive_one_keeps_network_stable` and `dynamics_keep_network_stable` still pass.
+- [ ] If you touched the `apply_factory_preset` path: every existing factory preset still sounds identical (or the change was approved by a maintainer).
+- [ ] If you touched `ParsedPreset` or `xml_to_params`: both a full XML and a partial XML load correctly.
+
+---
+
+## Known Issues
+
+These are documented so contributors don't spend time "fixing" the same issue twice.
+
+### `apply_texture_params` is unconditional on preset load
+
+When loading a user XML that does not contain a `<TextureRack>` block, `apply_texture_params` still runs. `parsed.texture` is filled with zeros and `parsed.enabled` is all `false`, so every texture parameter is reset to 0 and every layer is disabled. This is a known limitation. A proper fix would make `ParsedPreset.texture` a `[Option<f32>; 32]` and mirror the `apply_cloudseed_partial` pattern.
+
+### Logo quality in the About modal
+
+`manual/logo.png` is currently low-resolution (~150×200 px) and is upscaled to `64.0 × scale` logical pixels in the About modal, producing a pixelated look. This is a **file** issue, not a code issue: replacing the file with a 1024×1024 transparent PNG fixes it with zero code changes. Do not add image-processing code to work around this.
+
+### `SAMPLE_ACCURATE_AUTOMATION`
+
+See [Automation Smoothing](#automation-smoothing-sample_accurate_automation--false). If a PR enables it, the PR will be rejected unless it also adds `.with_smoother()` to every DSP-facing `FloatParam` and updates every `process_inner` path to consume the smoothed value.
+
+---
+
+## License
 
 By contributing to PEJVAK RVB, you agree that your contributions will be licensed under the **GNU General Public License v3.0 or later (GPL-3.0-or-later)**.
 
-Thank you for contributing to the open-source audio community! 🎛️🎶
-```
+Thank you for contributing to the open-source audio community!

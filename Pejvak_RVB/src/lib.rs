@@ -1043,33 +1043,33 @@ pub struct BloomParams {
 /// Eight parameters, all stored as normalised 0..1 values on the
 /// host side. The DSP maps them to their physical ranges internally.
 #[derive(Params)]
-pub struct ChimeParams {
-    #[id = "ChimeSpark"]
+pub struct IllusionParams {
+    #[id = "IllusionSpark"]
     pub spark: FloatParam,
-    #[id = "ChimeStill"]
+    #[id = "IllusionStill"]
     pub still: FloatParam,
-    #[id = "ChimeAura"]
+    #[id = "IllusionAura"]
     pub aura: FloatParam,
-    #[id = "ChimeVeil"]
+    #[id = "IllusionVeil"]
     pub veil: FloatParam,
-    #[id = "ChimeWide"]
+    #[id = "IllusionWide"]
     pub wide: FloatParam,
-    #[id = "ChimeTint"]
+    #[id = "IllusionTint"]
     pub tint: FloatParam,
-    #[id = "ChimeRate"]
+    #[id = "IllusionRate"]
     pub rate: FloatParam,
-    #[id = "ChimeGrain"]
+    #[id = "IllusionGrain"]
     pub grain: FloatParam,
-    #[id = "ChimeEnabled"]
+    #[id = "IllusionEnabled"]
     pub enabled: BoolParam,
 }
 
-impl Default for ChimeParams {
+impl Default for IllusionParams {
     fn default() -> Self {
         Self {
-            spark: FloatParam::new("ChimeSpark", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
+            spark: FloatParam::new("IllusionSpark", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
-            still: FloatParam::new("ChimeStill", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
+            still: FloatParam::new("IllusionStill", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_value_to_string(Arc::new(|v| {
                     if v < 0.02 {
                         "scattered".to_string()
@@ -1082,7 +1082,7 @@ impl Default for ChimeParams {
             // AURA: normalised 0..1 maps to -24..=+24 semitones.
             // 0.5 = 0 st (unison with the internal sequence).
             aura: FloatParam::new(
-                "ChimeAura",
+                "IllusionAura",
                 0.5, // 0 st
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
@@ -1095,10 +1095,10 @@ impl Default for ChimeParams {
                     format!("{:+} st", semis)
                 }
             })),
-            veil: FloatParam::new("ChimeVeil", 0.4, FloatRange::Linear { min: 0.0, max: 1.0 })
+            veil: FloatParam::new("IllusionVeil", 0.4, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
             wide: FloatParam::new(
-                "ChimeWide",
+                "IllusionWide",
                 0.5, // 0.5 * 2 = 1.0 = natural width
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
@@ -1110,19 +1110,19 @@ impl Default for ChimeParams {
                     format!("{:.0} %", w * 100.0)
                 }
             })),
-            tint: FloatParam::new("ChimeTint", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
+            tint: FloatParam::new("IllusionTint", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_value_to_string(Arc::new(|v| {
                     let hz = 800.0 + v * (18000.0 - 800.0);
                     format!("{:.0} Hz", hz)
                 })),
-            rate: FloatParam::new("ChimeRate", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
+            rate: FloatParam::new("IllusionRate", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_value_to_string(Arc::new(|v| {
                     let hz = 0.5 * (8.0_f32 / 0.5).powf(v);
                     format!("{:.2} Hz", hz)
                 })),
-            grain: FloatParam::new("ChimeGrain", 0.4, FloatRange::Linear { min: 0.0, max: 1.0 })
+            grain: FloatParam::new("IllusionGrain", 0.4, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_value_to_string(Arc::new(|v| format!("{:.0} ms", 30.0 + v * 270.0))),
-            enabled: BoolParam::new("ChimeEnabled", false),
+            enabled: BoolParam::new("IllusionEnabled", false),
         }
     }
 }
@@ -1668,8 +1668,8 @@ pub struct PejvakRvbParams {
     #[nested(group = "Texture Bloom")]
     pub bloom: BloomParams,
 
-    #[nested(group = "Chime")]
-    pub illusion: ChimeParams,
+    #[nested(group = "Illusion")]
+    pub illusion: IllusionParams,
 
     #[nested(group = "Velvet")]
     pub velvet: VelvetParams,
@@ -1687,12 +1687,20 @@ pub struct PejvakRvbParams {
     #[persist = "is_light_theme"]
     pub is_light_theme: Arc<AtomicBool>,
 
-    /// Master switch for tooltips and pop-ups. When off, all
-    /// `on_hover_text` calls become no-ops and the undo/redo
-    /// tooltip is suppressed. Persisted across editor sessions.
     #[cfg(feature = "gui-egui")]
     #[persist = "show_popups"]
     pub show_popups: Arc<AtomicBool>,
+
+    /// Name of the currently-loaded preset, persisted with the
+    /// plugin state so the label survives a close/reopen of the
+    /// editor and a session reload.
+    ///
+    /// Using `Arc<Mutex<String>>` (rather than an atomic) because
+    /// nice-plug's `#[persist]` requires interior mutability and
+    /// `String` has no atomic form.
+    #[cfg(feature = "gui-egui")]
+    #[persist = "current_preset"]
+    pub current_preset: Arc<std::sync::Mutex<String>>,
 
     #[cfg(feature = "gui-egui")]
     pub default_width: Arc<AtomicU32>,
@@ -1726,7 +1734,7 @@ impl Default for PejvakRvbParams {
             crystal: CrystalParams::default(),
             scatter: ScatterParams::default(),
             bloom: BloomParams::default(),
-            illusion: ChimeParams::default(),
+            illusion: IllusionParams::default(),
             velvet: VelvetParams::default(),
             ffdn: FfdnParams::default(),
             texture_order: Arc::new(AtomicU64::new(DEFAULT_TEXTURE_ORDER_PACKED)),
@@ -1744,6 +1752,8 @@ impl Default for PejvakRvbParams {
             is_light_theme: Arc::new(AtomicBool::new(false)),
             #[cfg(feature = "gui-egui")]
             show_popups: Arc::new(AtomicBool::new(true)),
+            #[cfg(feature = "gui-egui")]
+            current_preset: Arc::new(std::sync::Mutex::new("Init".to_string())),
             #[cfg(feature = "gui-egui")]
             default_width: Arc::new(AtomicU32::new(dw)),
             #[cfg(feature = "gui-egui")]
@@ -1872,7 +1882,7 @@ pub struct PejvakRvbPlugin {
     /// Cache of the last ILLUSION parameter values pushed into the DSP
     /// core. Layout: [mix, rate, steps, octaves, scale, random, grain,
     /// feedback].
-    last_chime: [f64; 8],
+    last_illusion: [f64; 8],
 }
 
 impl Default for PejvakRvbPlugin {
@@ -1886,7 +1896,7 @@ impl Default for PejvakRvbPlugin {
             last_pushed: [f64::NAN; PARAM_COUNT],
             last_tex: [f64::NAN; TEX_COUNT],
             last_order_packed: u64::MAX,
-            last_chime: [f64::NAN; 8],
+            last_illusion: [f64::NAN; 8],
             last_ffdn: [f64::NAN; 30],
         }
     }
@@ -1909,7 +1919,7 @@ impl Plugin for PejvakRvbPlugin {
 
     const MIDI_INPUT: MidiConfig = MidiConfig::None;
     const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
-    const SAMPLE_ACCURATE_AUTOMATION: bool = true;
+    const SAMPLE_ACCURATE_AUTOMATION: bool = false;
 
     type SysExMessage = ();
     type BackgroundTask = ();
@@ -1950,7 +1960,7 @@ impl Plugin for PejvakRvbPlugin {
         self.last_tex = [f64::NAN; TEX_COUNT];
         self.last_order_packed = u64::MAX;
 
-        self.last_chime = [f64::NAN; 8];
+        self.last_illusion = [f64::NAN; 8];
         self.last_ffdn = [f64::NAN; 30];
 
         true
@@ -2016,7 +2026,7 @@ impl PejvakRvbPlugin {
             ctrl.clear_buffers();
             self.last_pushed = [f64::NAN; PARAM_COUNT];
             self.last_tex = [f64::NAN; TEX_COUNT];
-            self.last_chime = [f64::NAN; 8];
+            self.last_illusion = [f64::NAN; 8];
             self.last_ffdn = [f64::NAN; 30];
             self.idle = TailIdle::new();
         }
@@ -2319,7 +2329,7 @@ impl PejvakRvbPlugin {
 
         // ---- ILLUSION — granular cloud with pitched overtones ---------------
 
-        let chime_spark = if self.params.illusion.enabled.value() {
+        let illusion_spark = if self.params.illusion.enabled.value() {
             self.params.illusion.spark.value() as f64
         } else {
             0.0
@@ -2332,8 +2342,8 @@ impl PejvakRvbPlugin {
         let aura_norm = self.params.illusion.aura.value() as f64;
         let aura_semis = ((aura_norm - 0.5) * 48.0).round();
 
-        let chime_vals: [f64; 8] = [
-            chime_spark,
+        let illusion_vals: [f64; 8] = [
+            illusion_spark,
             self.params.illusion.still.value() as f64,
             aura_semis,
             self.params.illusion.veil.value() as f64,
@@ -2344,19 +2354,19 @@ impl PejvakRvbPlugin {
         ];
 
         for i in 0..8 {
-            if chime_vals[i] != self.last_chime[i] {
+            if illusion_vals[i] != self.last_illusion[i] {
                 match i {
-                    0 => ctrl.set_chime_spark(chime_vals[i]),
-                    1 => ctrl.set_chime_still(chime_vals[i]),
-                    2 => ctrl.set_chime_aura(chime_vals[i]),
-                    3 => ctrl.set_chime_veil(chime_vals[i]),
-                    4 => ctrl.set_chime_wide(chime_vals[i]),
-                    5 => ctrl.set_chime_tint(chime_vals[i]),
-                    6 => ctrl.set_chime_rate(chime_vals[i]),
-                    7 => ctrl.set_chime_grain(chime_vals[i]),
+                    0 => ctrl.set_illusion_spark(illusion_vals[i]),
+                    1 => ctrl.set_illusion_still(illusion_vals[i]),
+                    2 => ctrl.set_illusion_aura(illusion_vals[i]),
+                    3 => ctrl.set_illusion_veil(illusion_vals[i]),
+                    4 => ctrl.set_illusion_wide(illusion_vals[i]),
+                    5 => ctrl.set_illusion_tint(illusion_vals[i]),
+                    6 => ctrl.set_illusion_rate(illusion_vals[i]),
+                    7 => ctrl.set_illusion_grain(illusion_vals[i]),
                     _ => {}
                 }
-                self.last_chime[i] = chime_vals[i];
+                self.last_illusion[i] = illusion_vals[i];
             }
         }
 
