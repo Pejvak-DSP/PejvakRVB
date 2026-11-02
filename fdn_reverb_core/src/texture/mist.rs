@@ -68,7 +68,7 @@ pub struct Mist {
     feedback: f64,
     /// Base delay as a fraction of the min..max range (0..1).
     delay_norm: f64,
-    /// LFO rate as a fraction of the 0.05..2 Hz range (0..1).
+    /// LFO rate as a fraction of the 0.05..25 Hz range (0..1).
     rate_norm: f64,
 }
 
@@ -274,7 +274,6 @@ impl TextureLayer for Mist {
 }
 
 impl Mist {
-
     pub fn set_hp_hz(&mut self, hz: f64) {
         self.hp_hz = hz.clamp(50.0, self.samplerate * 0.45);
         self.update_filters();

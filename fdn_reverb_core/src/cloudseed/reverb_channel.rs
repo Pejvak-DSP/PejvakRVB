@@ -87,6 +87,9 @@ pub struct ReverbChannel {
     samplerate: f64,
     buffer_size: usize,
 
+    /// 1 s + 2 samples of headroom: the PreDelay parameter may request
+    /// exactly `sr` samples at its 1000 ms maximum, and the two-tap
+    /// interpolation needs `delay + 1 < len`.
     pre_delay: ModulatedDelay,
     multitap: MultitapDiffuser,
     diffuser: AllpassDiffuser,
@@ -158,7 +161,7 @@ impl ReverbChannel {
     pub fn new(buffer_size: usize, samplerate: i32, left_or_right: ChannelLR) -> Self {
         let sr = samplerate as f64;
 
-        let pre_delay = ModulatedDelay::new(buffer_size, (sr * 1.0) as usize, 100);
+        let pre_delay = ModulatedDelay::new(buffer_size, (sr * 1.0) as usize + 2, 100);
         let multitap = MultitapDiffuser::new(samplerate as usize);
         let diffuser = AllpassDiffuser::new(sr, 150.0, buffer_size);
         let high_pass = Hp1::new(sr);
@@ -194,9 +197,8 @@ impl ReverbChannel {
 
         let mut velvet_in = VelvetNoiseFilter::with_seed_and_rate(channel_seed, sr);
         velvet_in.set_density(0.35);
-        
-        let mut velvet_out =
-            VelvetNoiseFilter::with_seed_and_rate(channel_seed ^ VN_OUT_XOR, sr);
+
+        let mut velvet_out = VelvetNoiseFilter::with_seed_and_rate(channel_seed ^ VN_OUT_XOR, sr);
         velvet_out.set_density(0.65);
 
         let mut ch = Self {
@@ -254,6 +256,12 @@ impl ReverbChannel {
     pub fn set_samplerate(&mut self, samplerate: i32) {
         self.samplerate = samplerate as f64;
         self.update_smooth_coeff();
+        // Buffers whose length derives from the sample rate must be
+        // reallocated before the rate-dependent delay parameters are
+        // re-applied below.
+        self.pre_delay
+            .set_delay_buffer_samples((self.samplerate * 1.0) as usize + 2);
+        self.multitap.set_buffer_samples(samplerate as usize);
         self.high_pass.set_samplerate(self.samplerate);
         self.low_pass.set_samplerate(self.samplerate);
         for line in &mut self.lines {
@@ -552,10 +560,7 @@ impl ReverbChannel {
                     self.temp_buffer[..n].copy_from_slice(&out[..n]);
                 } else {
                     let out = self.lines[i].get_output();
-                    for (dst, src) in self.temp_buffer[..n]
-                        .iter_mut()
-                        .zip(out[..n].iter())
-                    {
+                    for (dst, src) in self.temp_buffer[..n].iter_mut().zip(out[..n].iter()) {
                         *dst += *src;
                     }
                 }
@@ -588,14 +593,12 @@ impl ReverbChannel {
             // filter. This is what makes the output immune to the
             // stepwise parameter updates that a manual fader drag or
             // host automation produces.
-            self.smoothed_dry_out +=
-                self.smooth_coeff * (self.dry_out - self.smoothed_dry_out);
+            self.smoothed_dry_out += self.smooth_coeff * (self.dry_out - self.smoothed_dry_out);
             self.smoothed_predelay_out +=
                 self.smooth_coeff * (self.predelay_out - self.smoothed_predelay_out);
             self.smoothed_early_out +=
                 self.smooth_coeff * (self.early_out - self.smoothed_early_out);
-            self.smoothed_line_out +=
-                self.smooth_coeff * (self.line_out - self.smoothed_line_out);
+            self.smoothed_line_out += self.smooth_coeff * (self.line_out - self.smoothed_line_out);
 
             // Wet sum: everything except the dry signal.
             let wet = self.smoothed_predelay_out * predelay_out[i]

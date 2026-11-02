@@ -30,7 +30,7 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
   # ==========================================================================
-  # Windows
+  # Windows Build & Installer
   # ==========================================================================
   build-windows:
     name: Build Windows
@@ -47,13 +47,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-nice-plug
-        run: cargo install cargo-nice-plug --locked
+        run: cargo install cargo-nice-plug --locked --version 0.1.1
 
       - name: Build Plugin
         run: cargo nice-plug bundle Pejvak_RVB --release
 
-      - name: Add Installer Script and Package
+      - name: Create Windows Installer
         run: |
+          # Create the install script
           $bat_content = @"
           @echo off
           echo =====================================
@@ -77,16 +78,20 @@ jobs:
           pause
           "@
 
-          $bat_content | Out-File -FilePath target\bundled\Install_Windows.bat -Encoding ASCII
-          Compress-Archive -Path target/bundled/* -DestinationPath PEJVAK_RVB_Windows.zip
+          $bat_content | Out-File -FilePath target\bundled\install.bat -Encoding ASCII
 
+          # Package as a self-extracting EXE (runs install.bat automatically)
+          cd target\bundled
+          7z a -sfx -mx=9 -ms=on ..\..\PEJVAK-RVB-windows-x64-setup.exe .\*
+          cd ..\..
+          
       - uses: actions/upload-artifact@v4
         with:
           name: windows-bundle
-          path: PEJVAK_RVB_Windows.zip
+          path: PEJVAK-RVB-windows-x64-setup.exe
 
   # ==========================================================================
-  # macOS (Universal Binary)
+  # macOS Build & Installer (Universal Binary)
   # ==========================================================================
   build-macos:
     name: Build macOS
@@ -103,7 +108,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-nice-plug
-        run: cargo install cargo-nice-plug --locked
+        run: cargo install cargo-nice-plug --locked --version 0.1.1
 
       - name: Build for Apple Silicon
         run: cargo nice-plug bundle Pejvak_RVB --release --target aarch64-apple-darwin
@@ -126,45 +131,32 @@ jobs:
           find "$BUNDLE_DIR" -type f -path "*/Contents/MacOS/*" -exec cp target/universal/release/libPejvak_RVB.dylib {} \;
           find "$BUNDLE_DIR" -type f -path "*/Contents/MacOS/*" -exec chmod +x {} \;
 
-      - name: Create Installer Script and Package
+      - name: Create macOS PKG
         run: |
-          BUNDLE_DIR="target/bundled"
-          cd "$BUNDLE_DIR"
-
-          cat << 'EOF' > "Install PEJVAK RVB.command"
-          #!/bin/bash
-          echo "====================================="
-          echo " Installing PEJVAK RVB for macOS"
-          echo "====================================="
-
-          mkdir -p ~/Library/Audio/Plug-Ins/VST3
-          mkdir -p ~/Library/Audio/Plug-Ins/CLAP
-
-          echo "Copying VST3..."
-          cp -R "PEJVAK RVB.vst3" ~/Library/Audio/Plug-Ins/VST3/
-
-          echo "Copying CLAP..."
-          cp -R "Pejvak_RVB.clap" ~/Library/Audio/Plug-Ins/CLAP/
-
-          echo "Removing macOS quarantine attribute..."
-          xattr -cr ~/Library/Audio/Plug-Ins/VST3/"PEJVAK RVB.vst3"
-          xattr -cr ~/Library/Audio/Plug-Ins/CLAP/Pejvak_RVB.clap
-
-          echo ""
-          echo "Installation Complete! Please restart your DAW."
-          read -p "Press Enter to exit..."
-          EOF
-
-          chmod +x "Install PEJVAK RVB.command"
-          zip -r ../../PEJVAK_RVB_macOS.zip *
+          # Create a payload directory with the proper Apple folder structure
+          mkdir -p payload/Library/Audio/Plug-Ins/VST3
+          mkdir -p payload/Library/Audio/Plug-Ins/CLAP
+          
+          cp -R "target/bundled/PEJVAK RVB.vst3" payload/Library/Audio/Plug-Ins/VST3/
+          cp -R "target/bundled/Pejvak_RVB.clap" payload/Library/Audio/Plug-Ins/CLAP/
+          
+          # Remove quarantine attributes prior to packaging
+          xattr -cr "payload/Library/Audio/Plug-Ins/VST3/PEJVAK RVB.vst3"
+          xattr -cr "payload/Library/Audio/Plug-Ins/CLAP/Pejvak_RVB.clap"
+          
+          # Build the PKG installer
+          pkgbuild --root payload \
+                   --identifier com.pejvakdsp.rvb \
+                   --version ${{ github.ref_name }} \
+                   PEJVAK-RVB-macos-universal.pkg
 
       - uses: actions/upload-artifact@v4
         with:
           name: macos-bundle
-          path: PEJVAK_RVB_macOS.zip
+          path: PEJVAK-RVB-macos-universal.pkg
 
   # ==========================================================================
-  # Linux
+  # Linux Build & Archive
   # ==========================================================================
   build-linux:
     name: Build Linux
@@ -189,7 +181,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-nice-plug
-        run: cargo install cargo-nice-plug --locked
+        run: cargo install cargo-nice-plug --locked --version 0.1.1
 
       - name: Build Plugin
         run: cargo nice-plug bundle Pejvak_RVB --release
@@ -197,12 +189,13 @@ jobs:
       - name: Package Plugins
         run: |
           cd target/bundled
-          tar -czvf ../../PEJVAK_RVB_Linux.tar.gz *
+          tar -czvf ../../PEJVAK-RVB-linux-x64.tar.gz *
+          cd ../..
 
       - uses: actions/upload-artifact@v4
         with:
           name: linux-bundle
-          path: PEJVAK_RVB_Linux.tar.gz
+          path: PEJVAK-RVB-linux-x64.tar.gz
 
   # ==========================================================================
   # Create GitHub Release (single, after all builds)
@@ -222,7 +215,7 @@ jobs:
       - name: Collect release assets
         run: |
           mkdir -p release-assets
-          find artifacts -type f \( -name "*.zip" -o -name "*.tar.gz" \) \
+          find artifacts -type f \( -name "*.exe" -o -name "*.pkg" -o -name "*.tar.gz" \) \
             -exec cp {} release-assets/ \;
           echo "=== Assets to upload ==="
           ls -la release-assets/

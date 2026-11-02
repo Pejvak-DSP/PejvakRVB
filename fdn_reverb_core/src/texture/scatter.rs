@@ -133,7 +133,10 @@ impl Scatter {
             buf_len,
             grains: [Grain::INACTIVE; MAX_GRAINS],
             spawn_countdown: 1.0,
-            rng_state: 0xD1B5_4A32_D192_ED03,
+            // Seeded from a global instance counter (see
+            // `texture::instance_seed`) so two instances of the plugin
+            // in the same process never share the same grain sequence.
+            rng_state: crate::texture::instance_seed(0xD1B5_4A32_D192_ED03),
             fb_l: 0.0,
             fb_r: 0.0,
             mix: 0.0,
@@ -391,7 +394,6 @@ impl TextureLayer for Scatter {
 }
 
 impl Scatter {
-
     pub fn set_spread_norm(&mut self, v: f64) {
         self.spread_norm = v.clamp(0.0, 1.0);
     }

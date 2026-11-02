@@ -121,8 +121,8 @@ const GATE_RELEASE_MS: f64 = 80.0;
 // full amount never closed in practice. -10 dBFS is just above
 // the loudest wet level and lets the gate cut the tail as soon
 // as it drops below the chosen threshold.
-const GATE_THRESHOLD_MIN: f64 = 1.0e-3;   // -60 dBFS
-const GATE_THRESHOLD_MAX: f64 = 3.16e-1;  // -10 dBFS
+const GATE_THRESHOLD_MIN: f64 = 1.0e-3; // -60 dBFS
+const GATE_THRESHOLD_MAX: f64 = 3.16e-1; // -10 dBFS
 
 /// Smooth, tubey saturation.
 ///
@@ -154,7 +154,8 @@ const GATE_THRESHOLD_MAX: f64 = 3.16e-1;  // -10 dBFS
 ///    saturation stage; quiet tails pass through essentially
 ///    untouched.
 #[inline]
-fn velvet_saturate(x: f64, amount: f64) -> f64 {    if amount <= 0.0 {
+fn velvet_saturate(x: f64, amount: f64) -> f64 {
+    if amount <= 0.0 {
         return x;
     }
     // Pre-gain: 1x .. 1.8x. Enough to push transients into the
@@ -468,8 +469,12 @@ impl FfdnCore {
 
     pub fn set_sample_rate(&mut self, sample_rate: f64) {
         self.sample_rate = sample_rate;
-        self.net_l.set_samplerate_shelves(sample_rate);
-        self.net_r.set_samplerate_shelves(sample_rate);
+        // Reallocate the delay-line buffers for the new rate (their
+        // capacity derives from the sample rate) and refresh the
+        // per-line filter coefficients. `recompute_all` below then
+        // re-derives the delays against the new capacity.
+        self.net_l.set_sample_rate(sample_rate);
+        self.net_r.set_sample_rate(sample_rate);
 
         // Refresh the tilt biquads at the new sample rate. The gains
         // and frequencies are re-derived from the stored parameters
@@ -1191,8 +1196,7 @@ impl FfdnCore {
         // effect grows quickly with `amount`. At a = 0.25 the attack
         // time is already ~250 ms (square-law mapping), which is long
         // enough to hear on a typical 3 s reverb tail.
-        let attack_ms =
-            ATTACK_GAIN_MIN_MS + a.sqrt() * (ATTACK_GAIN_MAX_MS - ATTACK_GAIN_MIN_MS);
+        let attack_ms = ATTACK_GAIN_MIN_MS + a.sqrt() * (ATTACK_GAIN_MAX_MS - ATTACK_GAIN_MIN_MS);
         self.attack_peak_coeff = one_pole_coeff(ATTACK_PEAK_ATTACK_MS, self.sample_rate);
         self.attack_peak_release_coeff = one_pole_coeff(ATTACK_PEAK_RELEASE_MS, self.sample_rate);
         self.attack_gain_coeff = one_pole_coeff(attack_ms, self.sample_rate);
@@ -1344,7 +1348,7 @@ impl SingleNetwork {
     fn recompute_delays(&mut self, base_ms: f64, spread: f64, sample_rate: f64) {
         let n = self.active_lines;
         let base = base_ms * 1e-3 * sample_rate;
-    
+
         let mut state = self.seed | 1;
         for i in 0..n {
             state ^= state << 13;
@@ -1352,7 +1356,7 @@ impl SingleNetwork {
             state ^= state << 17;
             let unit = ((state >> 11) as f64) / ((1u64 << 53) as f64);
             let scale = 1.0 + spread * (2.0 * unit - 1.0);
-    
+
             // Clamp to the line's actual capacity BEFORE storing the
             // value in `delays_samples`.
             //
@@ -1364,12 +1368,11 @@ impl SingleNetwork {
             // audible decay comes out shorter than requested.
             let samples_raw = (base * scale).round().max(2.0) as usize;
             let samples = samples_raw.min(self.lines[i].max_delay_samples());
-    
+
             self.delays_samples[i] = samples;
             self.lines[i].set_delay(samples);
         }
     }
-    
 
     fn recompute_feedback(&mut self, decay_seconds: f64, sample_rate: f64) {
         for i in 0..self.active_lines {
@@ -1390,6 +1393,23 @@ impl SingleNetwork {
             let rate = rate_hz * self.mod_rate_multipliers[i];
             self.lines[i].set_modulation(amount_samples, rate, sample_rate);
         }
+    }
+
+    /// Reallocates the delay-line buffers for a new sample rate and
+    /// refreshes the per-line filter coefficients. The network keeps
+    /// its parameters, so the caller must run `recompute_all` (or an
+    /// equivalent) afterwards to re-derive the sample-domain delays.
+    ///
+    /// # Real-time safety
+    ///
+    /// Not real-time safe (heap reallocation). Call this from a
+    /// control path, never from the audio thread.
+    fn set_sample_rate(&mut self, sample_rate: f64) {
+        let max_delay_samples = (sample_rate * 0.5).ceil() as usize;
+        for line in &mut self.lines {
+            line.set_buffer_samples(max_delay_samples);
+        }
+        self.set_samplerate_shelves(sample_rate);
     }
 
     fn set_samplerate_shelves(&mut self, sr: f64) {
@@ -1560,6 +1580,41 @@ mod tests {
         ffdn.process_inplace(&mut l2, &mut r2);
         for v in l2.iter() {
             assert!(v.abs() < 1e-12);
+        }
+    }
+
+    /// Verifies that `set_sample_rate` really reallocates the delay
+    /// buffers, so the full 500 ms size range stays usable at the new
+    /// rate (previously the buffers kept their construction-time
+    /// capacity and delays were silently clamped shorter).
+    #[test]
+    fn set_sample_rate_resizes_delay_buffers() {
+        let mut ffdn = FfdnCore::new(8, 64, 48000.0);
+        assert_eq!(ffdn.net_l.lines[0].max_delay_samples(), 24_000 - 2);
+
+        ffdn.set_sample_rate(96_000.0);
+        assert_eq!(
+            ffdn.net_l.lines[0].max_delay_samples(),
+            48_000 - 2,
+            "delay buffers must be reallocated at the new rate"
+        );
+        assert_eq!(ffdn.net_r.lines[0].max_delay_samples(), 48_000 - 2);
+
+        // A 500 ms base delay must now be honoured (within the 2-sample
+        // interpolation headroom) instead of being clamped to the old
+        // 48 kHz capacity.
+        ffdn.set_delay_spread(0.0);
+        ffdn.set_base_delay_ms(500.0);
+        for net in [&ffdn.net_l, &ffdn.net_r] {
+            for i in 0..net.active_lines {
+                let samples = net.delays_samples[i];
+                assert!(samples <= net.lines[i].max_delay_samples());
+                let ms = samples as f64 / 96_000.0 * 1000.0;
+                assert!(
+                    (ms - 500.0).abs() < 0.05,
+                    "line {i}: delay = {ms} ms, expected ~500 ms"
+                );
+            }
         }
     }
 

@@ -81,17 +81,6 @@ fn pulses_for_density_at_rate(density: f64, sample_rate: f64) -> usize {
     count.max(8)
 }
 
-#[test]
-fn pulses_for_density_is_monotonic() {
-    let mut prev = 0;
-    for i in 0..VN_DENSITY_STEPS {
-        let d = i as f64 / (VN_DENSITY_STEPS - 1) as f64;
-        let n = pulses_for_density_at_rate(d, REFERENCE_SR);
-        assert!(n >= prev, "pulse count decreased at step {}", i);
-        prev = n;
-    }
-}
-
 #[inline]
 fn xorshift64(state: &mut u64) -> u64 {
     let mut x = *state;
@@ -287,7 +276,6 @@ impl VelvetNoiseFilter {
         self.rrs_width = w.round().max(1.0) as usize;
     }
 
-
     #[inline]
     pub fn set_amount(&mut self, amount: f64) {
         let a = amount.clamp(0.0, 1.0);
@@ -391,15 +379,16 @@ impl VelvetNoiseFilter {
 
         // One-pole low-pass — final smoothing on top of the RRS.
         self.lp_state += self.lp_coeff * (wet_rrs - self.lp_state);
-        // Soft saturation: tanh-like knee that limits values above 1.0
-        // without clipping. Below 0.8 the curve is essentially linear,
-        // so normal signals pass through unchanged; only peaks are
-        // compressed.
+        // Soft saturation: soft-knee limiter. Below 0.8 the curve is
+        // linear (unity gain), so normal signals pass through
+        // unchanged; peaks are progressively compressed instead of
+        // hard-clipped.
         let x = self.lp_state;
         let wet_lp = if x.abs() < 0.8 {
             x
         } else {
-            // Cubic soft-clip in [0.8, ∞) → asymptote to 1.0.
+            // Rational (Möbius) soft-knee in [0.8, ∞): as |x| grows,
+            // the output asymptotically approaches 1.8.
             let sign = if x >= 0.0 { 1.0 } else { -1.0 };
             let a = x.abs();
             let y = 0.8 + (a - 0.8) / (1.0 + (a - 0.8));

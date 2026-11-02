@@ -202,6 +202,27 @@ impl FfdnDelayLine {
         self.buffer.len().saturating_sub(2)
     }
 
+    /// Reallocates the delay buffer for a new sample rate. The buffer
+    /// is cleared and the read head is parked at zero so the next
+    /// `set_delay` snaps instead of gliding over stale memory.
+    ///
+    /// # Real-time safety
+    ///
+    /// Not real-time safe (heap reallocation). Call this from a
+    /// control path, never from the audio thread.
+    pub fn set_buffer_samples(&mut self, max_delay_samples: usize) {
+        let size = max_delay_samples.max(2);
+        if size == self.buffer.len() {
+            return;
+        }
+        self.buffer = vec![0.0; size];
+        self.write_idx = 0;
+        // Zero delay marks a fresh buffer: the next `set_delay` call
+        // snaps to its target (see `set_delay`) instead of gliding.
+        self.delay_samples = 0.0;
+        self.target_delay_samples = 0.0;
+    }
+
     /// Sets the master damping cutoff in Hz.
     pub fn set_damping_hz(&mut self, hz: f64, sample_rate: f64) {
         self.sample_rate = sample_rate;

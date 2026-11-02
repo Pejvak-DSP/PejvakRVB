@@ -1,6 +1,6 @@
 [package]
 name = "fdn_reverb_core"
-version = "1.0.1"
+version = "1.1.0"
 edition = "2021"
 authors = ["Amin Yousefinejad"]
 description = "PEJVAK RVB – Pejvak DSP Core Engine"

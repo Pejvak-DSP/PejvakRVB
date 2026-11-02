@@ -254,7 +254,6 @@ impl TextureLayer for Drift {
 }
 
 impl Drift {
-
     pub fn set_feedback(&mut self, fb: f64) {
         self.feedback = fb.clamp(0.0, 0.85);
     }

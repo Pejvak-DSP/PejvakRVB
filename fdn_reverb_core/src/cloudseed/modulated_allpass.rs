@@ -101,7 +101,15 @@ impl ModulatedAllpass {
         debug_assert!(n <= self.output.len());
         debug_assert_eq!(self.delay_buffer.len(), buf_len);
 
-        let sample_delay_i64 = self.sample_delay as i64;
+        // Defensive: `sample_delay` is a public field, so a future
+        // caller could set it past the fixed buffer capacity. The
+        // subsequent `delayed_index` would then still be negative
+        // after the single `+= buf_len` wrap and the `unsafe` block
+        // would read out of bounds. The clamp is a no-op for every
+        // legitimate configuration — the largest delay the engine
+        // can request is a 100 ms diffusion at 192 kHz, which is
+        // exactly `DELAY_BUFFER_SAMPLES`.
+        let sample_delay_i64 = (self.sample_delay.min(buf_len)) as i64;
         let buf_len_i64 = buf_len as i64;
         let fb = self.feedback;
 
@@ -186,6 +194,16 @@ impl ModulatedAllpass {
             // should no longer be required (kept for parity with the original)
             total_delay = 1.0;
         }
+        // Safety clamp: the interpolation taps read at `delay_a` and
+        // `delay_a + 1`, so the delay must stay at or below
+        // `DELAY_BUFFER_SAMPLES - 2`. For every legitimate configuration
+        // this is a no-op; it only engages when a delay was set past the
+        // fixed buffer capacity (e.g. a 100 ms diffusion delay at
+        // 192 kHz, whose sample count exactly equals the buffer length).
+        let max_delay = (DELAY_BUFFER_SAMPLES - 2) as f64;
+        if total_delay > max_delay {
+            total_delay = max_delay;
+        }
         self.delay_a = total_delay as usize;
         self.delay_b = self.delay_a + 1;
         let partial = total_delay - self.delay_a as f64;
@@ -199,10 +217,8 @@ impl ModulatedAllpass {
 ///
 /// Matches the C++ idiom `idx += len * (idx < 0)` — uses a conditional
 /// add instead of `%`, which is the slowest ALU op on x86 (~20–40 cycles
-/// per `div`). Callers must guarantee `sub < len`, which holds for every
-/// caller in this module because `delay_a`/`delay_b` are always derived
-/// from `sample_delay + mod_amount * m` and `sample_delay` is bounded by
-/// the delay buffer size (see `update()`).
+/// per `div`). `update()` clamps `delay_a`/`delay_b` to below `len`, so
+/// `sub < len` always holds.
 #[inline(always)]
 fn wrap_sub(base: usize, sub: usize, len: usize) -> usize {
     debug_assert!(sub < len, "wrap_sub: sub must be < len");
@@ -227,4 +243,39 @@ pub fn msvc_rand_nth(n: u32) -> f64 {
         out = ((s >> 16) & 0x7fff) as f64 / 32767.0;
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression: a `sample_delay` equal to the buffer length (a
+    /// 100 ms diffusion delay at 192 kHz produces exactly this) must
+    /// clamp to the usable range instead of tripping `wrap_sub`'s
+    /// debug assertion or wrapping a read index out of bounds.
+    #[test]
+    fn max_sample_delay_stays_in_bounds() {
+        let mut a = ModulatedAllpass::new(64, DELAY_BUFFER_SAMPLES);
+        a.feedback = 0.5;
+        let input: Vec<f64> = (0..64).map(|i| (i as f64) * 0.01).collect();
+        a.process(&input);
+        assert!(a.get_output().iter().all(|v| v.is_finite()));
+    }
+
+    /// Same clamp, exercised through the interpolated modulation path.
+    #[test]
+    fn max_sample_delay_with_modulation_stays_in_bounds() {
+        let mut a = ModulatedAllpass::new(64, DELAY_BUFFER_SAMPLES);
+        a.feedback = 0.5;
+        a.modulation_enabled = true;
+        a.interpolation_enabled = true;
+        a.mod_amount = 50.0;
+        a.mod_rate = 0.05;
+        let input: Vec<f64> = (0..64).map(|i| (i as f64) * 0.01).collect();
+        // Several blocks so `update()` runs at many modulation phases.
+        for _ in 0..32 {
+            a.process(&input);
+            assert!(a.get_output().iter().all(|v| v.is_finite()));
+        }
+    }
 }

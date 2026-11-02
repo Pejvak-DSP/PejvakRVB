@@ -42,6 +42,9 @@ pub mod presets;
 #[cfg(feature = "gui-egui")]
 mod manual;
 
+#[cfg(feature = "gui-egui")]
+pub mod updater;
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -428,17 +431,38 @@ fn parse_parameter(index: usize, s: &str) -> Option<f32> {
         .collect();
     let val: f64 = cleaned.parse().ok()?;
 
-    let mut lo = 0.0f64;
-    let mut hi = 1.0f64;
-    let target: f64 = if t.contains("db") {
+    // Parameter families that need unit-aware heuristics when the user
+    // types a bare number without the suffix.
+    //
+    //   * dB params  (7, 21, 23, 37, 38, 39, 40):  bare "-6" → -6 dB,
+    //     because the physical range is 0..1 and no bare number > 1 or
+    //     ≤ 0 can be a raw value. Bare "0.5" still means raw 0.5.
+    //   * % param    (41):                          bare "50" → 50 %,
+    //     because the physical range is 0..2 and bare "50" cannot be a
+    //     raw 0..1 value. Bare "0.5" is still raw 0.5 (50 %).
+    //   * LineDecay  (16):                          bare "500" → 500 ms,
+    //     because the display already shows ms below 1 s. Bare "3"
+    //     stays 3 s.
+    let is_db = matches!(index, 7 | 21 | 23 | 37 | 38 | 39 | 40);
+    let is_pct = index == 41;
+    let line_decay = Parameter::LineDecay as usize;
+
+    let target: f64 = if t.contains("db") || (is_db && (val <= 0.0 || val > 1.0)) {
         10f64.powf(val / 20.0)
-    } else if t.contains('%') {
+    } else if t.contains('%') || (is_pct && val > 1.0) {
         val / 100.0
+    } else if index == line_decay
+        && (t.contains("ms") || (!t.contains('s') && val > 1.0 && val < 1000.0))
+    {
+        val / 1000.0
     } else {
         val
     };
+
+    let mut lo = 0.0f64;
+    let mut hi = 1.0f64;
     let increasing = scaled_parameter_value(index, 1.0) >= scaled_parameter_value(index, 0.0);
-    for _ in 0..48 {
+    for _ in 0..60 {
         let mid = 0.5 * (lo + hi);
         let v = scaled_parameter_value(index, mid);
         if (v < target) == increasing {
@@ -447,7 +471,56 @@ fn parse_parameter(index: usize, s: &str) -> Option<f32> {
             hi = mid;
         }
     }
-    Some((0.5 * (lo + hi)) as f32)
+
+    // ---- f32 truncation-boundary fix ----------------------------
+    //
+    // After bisection we have a very narrow f64 interval around the
+    // true crossing point, but the parameter is stored as f32. When
+    // we cast the midpoint to f32, the rounding can push it just
+    // *below* the crossing — which is fatal for parameters whose
+    // `scaled_parameter_value` uses `(p * A) as i64` truncation
+    // (PreDelay, TapLength, DiffusionDelay, LineDelay,
+    // LateDiffusionDelay). There, `scaled(f32)` returns
+    // `target - 1` because truncation drops the fractional part.
+
+    let p_center = (0.5 * (lo + hi)) as f32;
+    let v_center = scaled_parameter_value(index, p_center as f64);
+    if v_center == target {
+        return Some(p_center);
+    }
+
+    // Try the direction that should move us toward the target
+    // first, then the opposite direction if that overshoots.
+    let need_up = (v_center < target) == increasing;
+    let first_sign: i64 = if need_up { 1 } else { -1 };
+
+    let mut best = p_center;
+    let mut best_dist = (v_center - target).abs();
+
+    for sign in [first_sign, -first_sign] {
+        let mut bits = p_center.to_bits() as i64;
+        for _ in 0..64 {
+            bits += sign;
+            if bits < 0 || bits > 1.0f32.to_bits() as i64 {
+                break;
+            }
+            let p = f32::from_bits(bits as u32);
+            if !(0.0..=1.0).contains(&p) {
+                break;
+            }
+            let v = scaled_parameter_value(index, p as f64);
+            if v == target {
+                return Some(p);
+            }
+            let d = (v - target).abs();
+            if d < best_dist {
+                best = p;
+                best_dist = d;
+            }
+        }
+    }
+
+    Some(best)
 }
 
 /// Push one Texture-Rack parameter into the DSP core **only if its
@@ -467,10 +540,291 @@ fn push_tex(
     }
 }
 
+/// Return type of every `with_string_to_value` closure.
+///
+/// Factored into an alias so the fully-spelled-out type does not
+/// trip `clippy::type_complexity` in the 20 parser functions below.
+type Parser = Arc<dyn Fn(&str) -> Option<f32> + Send + Sync>;
+
+// ============================================================================
+// Unit-aware string → value parsers
+// ============================================================================
+//
+// Every parameter whose text display carries a unit suffix ("%", "ms", "s",
+// "Hz", "dB", "st", "smp", "p/s", "g/s", "x") needs a matching
+// `with_string_to_value` closure so that typing the displayed value back
+// returns the exact same parameter value. `nice-plug`'s default parser only
+// understands bare numbers in the normalised 0..1 range, which silently
+// clamps anything else (typing "50" into a % parameter gives 100 %, not
+// 50 %). Every extension parameter below is wired through these helpers.
+//
+// Design notes:
+//   * Every parser clamps to [0, 1], matching what a slider would do.
+//   * Every parser returns `None` for unparseable input, which tells
+//     nice-plug to reject the edit and keep the previous value.
+//   * Bare numbers are given a family-specific heuristic (`%`, `dB`, `ms`)
+//     so the user can type "50" or "-6" without the suffix and still get
+//     the intuitive result.
+
+/// Splits `"500 ms"` → `(500.0, "ms")`, `"-6.0 dB"` → `(-6.0, "db")`,
+/// `"50 %"` → `(50.0, "%")`, `"-6"` → `(-6.0, "")`.
+fn parse_num_unit(s: &str) -> Option<(f64, String)> {
+    let t = s.trim().to_lowercase();
+    if t.is_empty() {
+        return None;
+    }
+    let num_start = t.find(|c: char| c.is_ascii_digit() || c == '-' || c == '+' || c == '.')?;
+    let num_end = t
+        .rfind(|c: char| c.is_ascii_digit() || c == '.')
+        .map(|p| p + 1)?;
+    if num_end <= num_start {
+        return None;
+    }
+    let value: f64 = t[num_start..num_end].parse().ok()?;
+    Some((value, t[num_end..].trim().to_string()))
+}
+
+/// Inverse of a linear display formula `display = offset + scale * v`.
+fn linear_parser(offset: f64, scale: f64) -> Parser {
+    Arc::new(move |s| {
+        let (n, _) = parse_num_unit(s)?;
+        Some(((n - offset) / scale).clamp(0.0, 1.0) as f32)
+    })
+}
+
+/// `%` display (`v * 100`). Bare numbers > 1 are treated as percent,
+/// so `"50"` → 0.50 but `"0.5"` → 0.50 (both work).
+fn percent_parser() -> Parser {
+    Arc::new(|s| {
+        let (n, unit) = parse_num_unit(s)?;
+        let v = if unit.contains('%') || n > 1.0 {
+            n / 100.0
+        } else {
+            n
+        };
+        Some(v.clamp(0.0, 1.0) as f32)
+    })
+}
+
+/// Escape hatch: receives the parsed number and the lowercased suffix.
+fn custom_parser<F>(f: F) -> Parser
+where
+    F: Fn(f64, &str) -> Option<f32> + Send + Sync + 'static,
+{
+    Arc::new(move |s| {
+        let (n, unit) = parse_num_unit(s)?;
+        f(n, &unit)
+    })
+}
+
+// ---- FFDN-specific parsers -------------------------------------------
+
+/// `FfdnDecay` display is "500 ms" below 1 s and "2.50 s" above.
+/// Accept both, plus bare numbers as seconds.
+fn ffdn_decay_parser() -> Parser {
+    Arc::new(|s| {
+        let (n, unit) = parse_num_unit(s)?;
+        let secs = if unit == "ms" { n / 1000.0 } else { n };
+        Some(((secs - 0.1) / 59.9).clamp(0.0, 1.0) as f32)
+    })
+}
+
+/// `FfdnMatrix` display is "House" / "Velvet".
+fn matrix_parser() -> Parser {
+    Arc::new(|s| match s.trim().to_lowercase().as_str() {
+        "house" | "householder" => Some(0.0),
+        "velvet" => Some(1.0),
+        _ => None,
+    })
+}
+
+/// `FfdnTiltAmt` display is `(v - 0.5) * 12` dB.
+fn tilt_amount_parser() -> Parser {
+    Arc::new(|s| {
+        let (n, _) = parse_num_unit(s)?;
+        Some((n / 12.0 + 0.5).clamp(0.0, 1.0) as f32)
+    })
+}
+
+/// `FfdnLines` display is `4 + round(v * 12)`, integer 4..16.
+/// The result is snapped to the 1/12 grid so `with_step_size` stays
+/// consistent across `set_parameter` and `set_parameter_normalized`.
+fn ffdn_lines_parser() -> Parser {
+    Arc::new(|s| {
+        let (n, _) = parse_num_unit(s)?;
+        let k = (n - 4.0).round().clamp(0.0, 12.0);
+        Some((k / 12.0) as f32)
+    })
+}
+
+/// `FfdnLoopHP` display is "off" at 20 Hz, then `20 * 25^v` Hz.
+/// "off" maps to **0.0** (physical bypass = 20 Hz, the minimum).
+fn loop_hp_parser() -> Parser {
+    let f = custom_parser(|n, _| Some(((n / 20.0).ln() / 25.0_f64.ln()).clamp(0.0, 1.0) as f32));
+    Arc::new(move |s| {
+        if s.trim().eq_ignore_ascii_case("off") {
+            Some(0.0)
+        } else {
+            f(s)
+        }
+    })
+}
+
+/// `FfdnLoopLP` display is "off" at 20 kHz, then `2000 * 10^v` Hz.
+/// "off" maps to **1.0** (physical bypass = 20 kHz, the maximum).
+fn loop_lp_parser() -> Parser {
+    let f = custom_parser(|n, _| Some(((n / 2000.0).ln() / 10.0_f64.ln()).clamp(0.0, 1.0) as f32));
+    Arc::new(move |s| {
+        if s.trim().eq_ignore_ascii_case("off") {
+            Some(1.0)
+        } else {
+            f(s)
+        }
+    })
+}
+
+// ---- Texture-specific parsers ----------------------------------------
+
+/// `ShimmerPitch` display is `round((v - 0.5) * 24)` semitones.
+/// The parser re-quantises to the nearest semitone.
+fn shimmer_pitch_parser() -> Parser {
+    Arc::new(|s| {
+        let (n, _) = parse_num_unit(s)?;
+        let semis = n.round();
+        Some((semis / 24.0 + 0.5).clamp(0.0, 1.0) as f32)
+    })
+}
+
+/// `CrystalDensity` display is `20 + (1 - v) * 230` ms (reverse-linear).
+fn crystal_density_parser() -> Parser {
+    Arc::new(|s| {
+        let (n, _) = parse_num_unit(s)?;
+        Some((1.0 - (n - 20.0) / 230.0).clamp(0.0, 1.0) as f32)
+    })
+}
+
+/// `ScatterDensity` display is `1000 / (15 + (1 - v) * 385)` grains/s.
+/// Accepts "g/s", "grains/s", "/s", "ms", or a bare number
+/// (< 100 assumed to be grains/s, otherwise milliseconds).
+fn scatter_density_parser() -> Parser {
+    Arc::new(|s| {
+        let (n, unit) = parse_num_unit(s)?;
+        let interval_ms = if unit.contains("ms") {
+            n
+        } else if unit.contains("grain") || unit.contains("/s") || n < 100.0 {
+            1000.0 / n.max(0.001)
+        } else {
+            n
+        };
+        Some((1.0 - (interval_ms - 15.0) / 385.0).clamp(0.0, 1.0) as f32)
+    })
+}
+
+/// `ScatterSpeed` display is `80 + (1 - v) * 1420` ms (reverse-linear).
+fn scatter_speed_parser() -> Parser {
+    Arc::new(|s| {
+        let (n, _) = parse_num_unit(s)?;
+        Some((1.0 - (n - 80.0) / 1420.0).clamp(0.0, 1.0) as f32)
+    })
+}
+
+/// `BloomRise` display is `50 + (1 - v) * 1950` ms, shown as s above 1 s.
+fn bloom_rise_parser() -> Parser {
+    Arc::new(|s| {
+        let (n, unit) = parse_num_unit(s)?;
+        let ms = if unit == "s" || unit == "sec" {
+            n * 1000.0
+        } else {
+            n
+        };
+        Some((1.0 - (ms - 50.0) / 1950.0).clamp(0.0, 1.0) as f32)
+    })
+}
+
+// ---- ILLUSION-specific parsers ---------------------------------------
+
+/// `IllusionStill` display is "scattered" / "calm" / `v * 100` %.
+fn still_parser() -> Parser {
+    Arc::new(|s| {
+        let t = s.trim().to_lowercase();
+        match t.as_str() {
+            "scattered" => Some(0.0),
+            "calm" => Some(1.0),
+            _ => {
+                let (n, unit) = parse_num_unit(s)?;
+                let v = if unit.contains('%') || n > 1.0 {
+                    n / 100.0
+                } else {
+                    n
+                };
+                Some(v.clamp(0.0, 1.0) as f32)
+            }
+        }
+    })
+}
+
+/// `IllusionAura` display is "unison" at 0 st, else `round((v - 0.5) * 48)` st.
+fn aura_parser() -> Parser {
+    Arc::new(|s| {
+        let t = s.trim().to_lowercase();
+        if t == "unison" {
+            return Some(0.5);
+        }
+        let (n, _) = parse_num_unit(s)?;
+        Some((n / 48.0 + 0.5).clamp(0.0, 1.0) as f32)
+    })
+}
+
+/// `IllusionWide` display is "mono" at 0, else `v * 200` %.
+fn wide_parser() -> Parser {
+    Arc::new(|s| {
+        let t = s.trim().to_lowercase();
+        if t == "mono" {
+            return Some(0.0);
+        }
+        let (n, unit) = parse_num_unit(s)?;
+        let pct = if unit.contains('%') || n > 1.0 {
+            n
+        } else {
+            n * 100.0
+        };
+        Some((pct / 200.0).clamp(0.0, 1.0) as f32)
+    })
+}
+
+/// `IllusionRate` display is `0.5 * 20^v` Hz.
+fn illusion_rate_parser() -> Parser {
+    Arc::new(|s| {
+        let (n, _) = parse_num_unit(s)?;
+        Some(((n / 0.5).ln() / 20.0_f64.ln()).clamp(0.0, 1.0) as f32)
+    })
+}
+
+// ---- Velvet-specific parsers -----------------------------------------
+
+/// `VelvetDensity` display is `1500 + v * 1500` p/s.
+fn velvet_density_parser() -> Parser {
+    Arc::new(|s| {
+        let (n, _) = parse_num_unit(s)?;
+        Some(((n - 1500.0) / 1500.0).clamp(0.0, 1.0) as f32)
+    })
+}
+
+/// `VelvetTone` display is "off" at 0, else `1 + v * 29` smp.
+fn velvet_tone_parser() -> Parser {
+    let f = custom_parser(|n, _| Some(((n - 1.0) / 29.0).clamp(0.0, 1.0) as f32));
+    Arc::new(move |s| {
+        if s.trim().eq_ignore_ascii_case("off") {
+            Some(0.0)
+        } else {
+            f(s)
+        }
+    })
+}
+
 // ============================================================================
 // Parameter groups
 // ============================================================================
-
 /// Input-stage parameters.
 #[derive(Params)]
 pub struct InputParams {
@@ -797,7 +1151,8 @@ impl Default for ShimmerParams {
     fn default() -> Self {
         Self {
             mix: FloatParam::new("ShimmerMix", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+                .with_string_to_value(percent_parser()),
             pitch: FloatParam::new(
                 "ShimmerPitch",
                 1.0,
@@ -810,25 +1165,29 @@ impl Default for ShimmerParams {
                 } else {
                     format!("{} st", semis)
                 }
-            })),
+            }))
+            .with_string_to_value(shimmer_pitch_parser()),
             feedback: FloatParam::new(
                 "ShimmerFeedback",
                 0.6,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+            .with_string_to_value(percent_parser()),
             low_cut: FloatParam::new(
                 "ShimmerLowCut",
                 0.2,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} Hz", 20.0 + v * 1980.0))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} Hz", 20.0 + v * 1980.0)))
+            .with_string_to_value(linear_parser(20.0, 1980.0)),
             high_cut: FloatParam::new(
                 "ShimmerHighCut",
                 0.6,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} Hz", 200.0 + v * 15000.0))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} Hz", 200.0 + v * 15000.0)))
+            .with_string_to_value(linear_parser(200.0, 15000.0)),
             enabled: BoolParam::new("ShimmerEnabled", false),
         }
     }
@@ -855,17 +1214,21 @@ impl Default for MistParams {
     fn default() -> Self {
         Self {
             mix: FloatParam::new("MistMix", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+                .with_string_to_value(percent_parser()),
             hp: FloatParam::new("MistHP", 0.1, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:.0} Hz", 100.0 + v * 2900.0))),
+                .with_value_to_string(Arc::new(|v| format!("{:.0} Hz", 100.0 + v * 2900.0)))
+                .with_string_to_value(linear_parser(100.0, 2900.0)),
             feedback: FloatParam::new(
                 "MistFeedback",
                 0.5,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+            .with_string_to_value(percent_parser()),
             delay: FloatParam::new("MistDelay", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:.0} ms", 8.0 + v * 32.0))),
+                .with_value_to_string(Arc::new(|v| format!("{:.0} ms", 8.0 + v * 32.0)))
+                .with_string_to_value(linear_parser(8.0, 32.0)),
             rate: FloatParam::new("MistRate", 0.25, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_value_to_string(Arc::new(|v| {
                     let hz = 0.05 + v * 24.95;
@@ -874,7 +1237,8 @@ impl Default for MistParams {
                     } else {
                         format!("{:.0} Hz", hz)
                     }
-                })),
+                }))
+                .with_string_to_value(linear_parser(0.05, 24.95)),
             enabled: BoolParam::new("MistEnabled", false),
         }
     }
@@ -901,19 +1265,24 @@ impl Default for DriftParams {
     fn default() -> Self {
         Self {
             mix: FloatParam::new("DriftMix", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+                .with_string_to_value(percent_parser()),
             feedback: FloatParam::new(
                 "DriftFeedback",
                 0.3,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+            .with_string_to_value(percent_parser()),
             delay: FloatParam::new("DriftDelay", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:.1} ms", 5.0 + v * 20.0))),
+                .with_value_to_string(Arc::new(|v| format!("{:.1} ms", 5.0 + v * 20.0)))
+                .with_string_to_value(linear_parser(5.0, 20.0)),
             rate: FloatParam::new("DriftRate", 0.3, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:.2} Hz", 0.02 + v * 0.50))),
+                .with_value_to_string(Arc::new(|v| format!("{:.2} Hz", 0.02 + v * 0.50)))
+                .with_string_to_value(linear_parser(0.02, 0.50)),
             depth: FloatParam::new("DriftDepth", 1.0, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:.2} ms", v * 0.4))),
+                .with_value_to_string(Arc::new(|v| format!("{:.2} ms", v * 0.4)))
+                .with_string_to_value(linear_parser(0.0, 0.4)),
             enabled: BoolParam::new("DriftEnabled", false),
         }
     }
@@ -938,25 +1307,29 @@ impl Default for CrystalParams {
     fn default() -> Self {
         Self {
             mix: FloatParam::new("CrystalMix", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+                .with_string_to_value(percent_parser()),
             size: FloatParam::new(
                 "CrystalSize",
                 0.4,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} ms", 15.0 + v * 135.0))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} ms", 15.0 + v * 135.0)))
+            .with_string_to_value(linear_parser(15.0, 135.0)),
             density: FloatParam::new(
                 "CrystalDensity",
                 0.5,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} ms", 20.0 + (1.0 - v) * 230.0))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} ms", 20.0 + (1.0 - v) * 230.0)))
+            .with_string_to_value(crystal_density_parser()),
             feedback: FloatParam::new(
                 "CrystalFeedback",
                 0.5,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+            .with_string_to_value(percent_parser()),
             enabled: BoolParam::new("CrystalEnabled", false),
         }
     }
@@ -983,13 +1356,15 @@ impl Default for ScatterParams {
     fn default() -> Self {
         Self {
             mix: FloatParam::new("ScatterMix", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+                .with_string_to_value(percent_parser()),
             spread: FloatParam::new(
                 "ScatterSpread",
                 0.5,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} ms", 30.0 + v * 370.0))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} ms", 30.0 + v * 370.0)))
+            .with_string_to_value(linear_parser(30.0, 370.0)),
             density: FloatParam::new(
                 "ScatterDensity",
                 0.5,
@@ -1003,19 +1378,22 @@ impl Default for ScatterParams {
                 } else {
                     format!("{:.0} grains/s", grains_per_sec)
                 }
-            })),
+            }))
+            .with_string_to_value(scatter_density_parser()),
             speed: FloatParam::new(
                 "ScatterSpeed",
                 0.5,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} ms", 80.0 + (1.0 - v) * 1420.0))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} ms", 80.0 + (1.0 - v) * 1420.0)))
+            .with_string_to_value(scatter_speed_parser()),
             feedback: FloatParam::new(
                 "ScatterFeedback",
                 0.3,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+            .with_string_to_value(percent_parser()),
             enabled: BoolParam::new("ScatterEnabled", false),
         }
     }
@@ -1067,26 +1445,34 @@ pub struct IllusionParams {
 impl Default for IllusionParams {
     fn default() -> Self {
         Self {
-            spark: FloatParam::new("IllusionSpark", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
-            still: FloatParam::new("IllusionStill", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| {
-                    if v < 0.02 {
-                        "scattered".to_string()
-                    } else if v > 0.98 {
-                        "calm".to_string()
-                    } else {
-                        format!("{:.0} %", v * 100.0)
-                    }
-                })),
-            // AURA: normalised 0..1 maps to -24..=+24 semitones.
-            // 0.5 = 0 st (unison with the internal sequence).
-            aura: FloatParam::new(
-                "IllusionAura",
-                0.5, // 0 st
+            spark: FloatParam::new(
+                "IllusionSpark",
+                0.0,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_step_size(1.0 / 48.0) // 1 semitone per step
+            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+            .with_string_to_value(percent_parser()),
+            still: FloatParam::new(
+                "IllusionStill",
+                0.5,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_value_to_string(Arc::new(|v| {
+                if v < 0.02 {
+                    "scattered".to_string()
+                } else if v > 0.98 {
+                    "calm".to_string()
+                } else {
+                    format!("{:.0} %", v * 100.0)
+                }
+            }))
+            .with_string_to_value(still_parser()),
+            aura: FloatParam::new(
+                "IllusionAura",
+                0.5,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_step_size(1.0 / 48.0)
             .with_value_to_string(Arc::new(|v| {
                 let semis = ((v - 0.5) * 48.0).round() as i32;
                 if semis == 0 {
@@ -1094,12 +1480,18 @@ impl Default for IllusionParams {
                 } else {
                     format!("{:+} st", semis)
                 }
-            })),
-            veil: FloatParam::new("IllusionVeil", 0.4, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+            }))
+            .with_string_to_value(aura_parser()),
+            veil: FloatParam::new(
+                "IllusionVeil",
+                0.4,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+            .with_string_to_value(percent_parser()),
             wide: FloatParam::new(
                 "IllusionWide",
-                0.5, // 0.5 * 2 = 1.0 = natural width
+                0.5,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
             .with_value_to_string(Arc::new(|v| {
@@ -1109,19 +1501,33 @@ impl Default for IllusionParams {
                 } else {
                     format!("{:.0} %", w * 100.0)
                 }
-            })),
-            tint: FloatParam::new("IllusionTint", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| {
-                    let hz = 800.0 + v * (18000.0 - 800.0);
-                    format!("{:.0} Hz", hz)
-                })),
-            rate: FloatParam::new("IllusionRate", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| {
-                    let hz = 0.5 * (8.0_f32 / 0.5).powf(v);
-                    format!("{:.2} Hz", hz)
-                })),
-            grain: FloatParam::new("IllusionGrain", 0.4, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:.0} ms", 30.0 + v * 270.0))),
+            }))
+            .with_string_to_value(wide_parser()),
+            tint: FloatParam::new(
+                "IllusionTint",
+                0.5,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_value_to_string(Arc::new(|v| {
+                format!("{:.0} Hz", 800.0 + v * (18000.0 - 800.0))
+            }))
+            .with_string_to_value(linear_parser(800.0, 17200.0)),
+            rate: FloatParam::new(
+                "IllusionRate",
+                0.5,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_value_to_string(Arc::new(|v| {
+                format!("{:.2} Hz", 0.5 * (10.0_f32 / 0.5).powf(v))
+            }))
+            .with_string_to_value(illusion_rate_parser()),
+            grain: FloatParam::new(
+                "IllusionGrain",
+                0.4,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_value_to_string(Arc::new(|v| format!("{:.0} ms", 30.0 + v * 270.0)))
+            .with_string_to_value(linear_parser(30.0, 270.0)),
             enabled: BoolParam::new("IllusionEnabled", false),
         }
     }
@@ -1131,7 +1537,8 @@ impl Default for BloomParams {
     fn default() -> Self {
         Self {
             mix: FloatParam::new("BloomMix", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+                .with_string_to_value(percent_parser()),
             rise: FloatParam::new("BloomRise", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_value_to_string(Arc::new(|v| {
                     let ms = 50.0 + (1.0 - v) * (2000.0 - 50.0);
@@ -1140,19 +1547,23 @@ impl Default for BloomParams {
                     } else {
                         format!("{:.2} s", ms / 1000.0)
                     }
-                })),
+                }))
+                .with_string_to_value(bloom_rise_parser()),
             size: FloatParam::new("BloomSize", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:.0} ms", 60.0 + v * (250.0 - 60.0)))),
+                .with_value_to_string(Arc::new(|v| format!("{:.0} ms", 60.0 + v * (250.0 - 60.0))))
+                .with_string_to_value(linear_parser(60.0, 190.0)),
             feedback: FloatParam::new(
                 "BloomFeedback",
                 0.5,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+            .with_string_to_value(percent_parser()),
             tone: FloatParam::new("BloomTone", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_value_to_string(Arc::new(|v| {
                     format!("{:.0} Hz", 2000.0 + v * (12000.0 - 2000.0))
-                })),
+                }))
+                .with_string_to_value(linear_parser(2000.0, 10000.0)),
             enabled: BoolParam::new("BloomEnabled", false),
         }
     }
@@ -1177,7 +1588,8 @@ impl Default for VelvetParams {
                 0.0,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+            .with_string_to_value(percent_parser()),
             density: FloatParam::new(
                 "VelvetDensity",
                 0.5,
@@ -1185,7 +1597,8 @@ impl Default for VelvetParams {
             )
             .with_value_to_string(Arc::new(|v| {
                 format!("{:.0} p/s", 1500.0 + v * (3000.0 - 1500.0))
-            })),
+            }))
+            .with_string_to_value(velvet_density_parser()),
             tone: FloatParam::new("VelvetTone", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_value_to_string(Arc::new(|v| {
                     const MAX_RRS_WIDTH: f32 = 30.0;
@@ -1195,7 +1608,8 @@ impl Default for VelvetParams {
                     } else {
                         format!("{:.0} smp", width)
                     }
-                })),
+                }))
+                .with_string_to_value(velvet_tone_parser()),
         }
     }
 }
@@ -1363,45 +1777,50 @@ impl Default for FfdnParams {
     fn default() -> Self {
         Self {
             use_ffdn: BoolParam::new("UseFfdn", false),
-            size: FloatParam::new(
-                "FfdnSize",
-                0.23, // ~50 ms
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} ms", 5.0 + v * 195.0))),
-            decay: FloatParam::new(
-                "FfdnDecay",
-                0.05, // ~3.1 s with the new 60 s range
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_value_to_string(Arc::new(|v| {
-                let s = 0.1 + v * 59.9; // 0.1 s .. 60 s
-                if s < 1.0 {
-                    format!("{:.0} ms", s * 1000.0)
-                } else {
-                    format!("{:.2} s", s)
-                }
-            })),
+
+            size: FloatParam::new("FfdnSize", 0.23, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_value_to_string(Arc::new(|v| format!("{:.0} ms", 5.0 + v * 195.0)))
+                .with_string_to_value(linear_parser(5.0, 195.0)),
+
+            decay: FloatParam::new("FfdnDecay", 0.05, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_value_to_string(Arc::new(|v| {
+                    let s = 0.1 + v * 59.9;
+                    if s < 1.0 {
+                        format!("{:.0} ms", s * 1000.0)
+                    } else {
+                        format!("{:.2} s", s)
+                    }
+                }))
+                .with_string_to_value(ffdn_decay_parser()),
+
             damping: FloatParam::new(
                 "FfdnDamping",
-                0.385, // ~8000 Hz
+                0.385,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} Hz", 500.0 + v * 19500.0))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} Hz", 500.0 + v * 19500.0)))
+            .with_string_to_value(linear_parser(500.0, 19500.0)),
+
             spread: FloatParam::new("FfdnSpread", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+                .with_string_to_value(percent_parser()),
+
             mod_amount: FloatParam::new(
                 "FfdnModAmt",
-                0.167, // ~0.5 ms
+                0.167,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.2} ms", v * 3.0))),
+            .with_value_to_string(Arc::new(|v| format!("{:.2} ms", v * 3.0)))
+            .with_string_to_value(linear_parser(0.0, 3.0)),
+
             mod_rate: FloatParam::new(
                 "FfdnModRate",
-                0.122, // ~0.7 Hz
+                0.122,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.2} Hz", 0.1 + v * 4.9))),
+            .with_value_to_string(Arc::new(|v| format!("{:.2} Hz", 0.1 + v * 4.9)))
+            .with_string_to_value(linear_parser(0.1, 4.9)),
+
             matrix_type: FloatParam::new(
                 "FfdnMatrix",
                 0.0,
@@ -1414,97 +1833,99 @@ impl Default for FfdnParams {
                 } else {
                     "Velvet".to_string()
                 }
-            })),
+            }))
+            .with_string_to_value(matrix_parser()),
 
             bass_mult: FloatParam::new(
                 "FfdnBassMult",
-                0.5, // 2^0 = 1.0, neutral
+                0.5,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
             .with_value_to_string(Arc::new(|v| {
-                let m = 2.0_f32.powf((v - 0.5) * 2.0);
-                format!("{:.2}x", m)
+                format!("{:.2}x", 2.0_f32.powf((v - 0.5) * 2.0))
+            }))
+            .with_string_to_value(custom_parser(|n, _| {
+                Some((n.log2() / 2.0 + 0.5).clamp(0.0, 1.0) as f32)
             })),
 
             bass_freq: FloatParam::new(
                 "FfdnBassFreq",
-                0.537, // ~250 Hz
+                0.537,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} Hz", 50.0 * 20.0_f32.powf(v)))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} Hz", 50.0 * 20.0_f32.powf(v))))
+            .with_string_to_value(custom_parser(|n, _| {
+                Some(((n / 50.0).ln() / 20.0_f64.ln()).clamp(0.0, 1.0) as f32)
+            })),
 
             treble_mult: FloatParam::new(
                 "FfdnTrebleMult",
-                0.5, // 2^0 = 1.0, neutral
+                0.5,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
             .with_value_to_string(Arc::new(|v| {
-                let m = 2.0_f32.powf((v - 0.5) * 2.0);
-                format!("{:.2}x", m)
+                format!("{:.2}x", 2.0_f32.powf((v - 0.5) * 2.0))
+            }))
+            .with_string_to_value(custom_parser(|n, _| {
+                Some((n.log2() / 2.0 + 0.5).clamp(0.0, 1.0) as f32)
             })),
 
             treble_freq: FloatParam::new(
                 "FfdnTrebleFreq",
-                0.512, // ~4000 Hz
+                0.512,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} Hz", 1000.0 * 15.0_f32.powf(v)))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} Hz", 1000.0 * 15.0_f32.powf(v))))
+            .with_string_to_value(custom_parser(|n, _| {
+                Some(((n / 1000.0).ln() / 15.0_f64.ln()).clamp(0.0, 1.0) as f32)
+            })),
 
             diffusion: FloatParam::new(
                 "FfdnDiffusion",
-                0.5, // moderate default
+                0.5,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+            .with_string_to_value(percent_parser()),
 
-            // ---- FFDN CHARACTER ---------------------------
-            // Defaults chosen so that a fresh instance is bit-identical
-            // to the pre- engine: all three CHARACTER switches
-            // start OFF, and the numeric values are their neutral
-            // positions (cross = 0 = independent, drive = 0 = linear,
-            // tilt_amount = 0.5 = flat).
             cross: FloatParam::new("FfdnCross", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+                .with_string_to_value(percent_parser()),
 
             drive: FloatParam::new("Saturation", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+                .with_string_to_value(percent_parser()),
 
             tilt_freq: FloatParam::new(
                 "FfdnTiltFreq",
-                0.5, // ~1 kHz on the log scale below
+                0.5,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| {
-                // 100 Hz .. 10 kHz, log-spaced.
-                let hz = 100.0 * 100.0_f32.powf(v);
-                format!("{:.0} Hz", hz)
+            .with_value_to_string(Arc::new(|v| format!("{:.0} Hz", 100.0 * 100.0_f32.powf(v))))
+            .with_string_to_value(custom_parser(|n, _| {
+                Some(((n / 100.0).ln() / 100.0_f64.ln()).clamp(0.0, 1.0) as f32)
             })),
 
             tilt_amount: FloatParam::new(
                 "FfdnTiltAmt",
-                0.5, // flat
+                0.5,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| {
-                let db = (v - 0.5) * 12.0;
-                format!("{:+.1} dB", db)
-            })),
+            .with_value_to_string(Arc::new(|v| format!("{:+.1} dB", (v - 0.5) * 12.0)))
+            .with_string_to_value(tilt_amount_parser()),
 
             er_level: FloatParam::new(
                 "FfdnErLevel",
                 0.0,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+            .with_string_to_value(percent_parser()),
 
             drive_enabled: BoolParam::new("SaturationEnabled", false),
             tilt_enabled: BoolParam::new("FfdnTiltEnabled", false),
             er_enabled: BoolParam::new("FfdnErEnabled", false),
 
-            // ---- FFDN NETWORK -----------------------------
-            // `lines = 0.333` maps to 8 lines, matching the fixed
-            // value used before this release. `density` and `decorr`
-            // default to their neutral centers.
             lines: FloatParam::new(
                 "FfdnLines",
                 0.333,
@@ -1514,76 +1935,65 @@ impl Default for FfdnParams {
             .with_value_to_string(Arc::new(|v| {
                 let n = 4 + (v * 12.0).round() as i32;
                 format!("{}", n.clamp(4, 16))
-            })),
+            }))
+            .with_string_to_value(ffdn_lines_parser()),
 
             density: FloatParam::new(
                 "FfdnDensity",
                 0.5,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+            .with_string_to_value(percent_parser()),
 
             decorr: FloatParam::new("FfdnDecorr", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_value_to_string(Arc::new(|v| format!("{:.1} %", 1.0 + v * 6.0)))
+                .with_string_to_value(linear_parser(1.0, 6.0)),
+
+            loop_hp: FloatParam::new("FfdnLoopHP", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_value_to_string(Arc::new(|v| {
-                    // Map 0..1 -> 1%..7% L/R delay offset.
-                    let pct = 1.0 + v * 6.0;
-                    format!("{:.1} %", pct)
-                })),
+                    if v < 0.005 {
+                        "off".to_string()
+                    } else {
+                        format!("{:.0} Hz", 20.0 * (500.0_f32 / 20.0).powf(v))
+                    }
+                }))
+                .with_string_to_value(loop_hp_parser()),
 
-            // ---- FFDN FILTER ------------------------------
-            loop_hp: FloatParam::new(
-                "FfdnLoopHP",
-                0.0, // 20 Hz, neutral
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_value_to_string(Arc::new(|v| {
-                if v < 0.005 {
-                    "off".to_string()
-                } else {
-                    // Log-spaced 20..500 Hz
-                    let hz = 20.0 * (500.0_f32 / 20.0).powf(v);
-                    format!("{:.0} Hz", hz)
-                }
-            })),
-
-            loop_lp: FloatParam::new(
-                "FfdnLoopLP",
-                1.0, // 20 kHz, neutral
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_value_to_string(Arc::new(|v| {
-                if v > 0.995 {
-                    "off".to_string()
-                } else {
-                    let hz = 2000.0 * (20000.0_f32 / 2000.0).powf(v);
-                    format!("{:.0} Hz", hz)
-                }
-            })),
+            loop_lp: FloatParam::new("FfdnLoopLP", 1.0, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_value_to_string(Arc::new(|v| {
+                    if v > 0.995 {
+                        "off".to_string()
+                    } else {
+                        format!("{:.0} Hz", 2000.0 * (20000.0_f32 / 2000.0).powf(v))
+                    }
+                }))
+                .with_string_to_value(loop_lp_parser()),
 
             mid_focus: FloatParam::new(
                 "FfdnMidFocus",
                 0.0,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+            .with_string_to_value(percent_parser()),
 
-            // ---- FFDN DYNAMICS ----------------------------
             attack: FloatParam::new("FfdnAttack", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+                .with_string_to_value(percent_parser()),
 
             ducking: FloatParam::new(
                 "FfdnDucking",
                 0.0,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
-            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+            .with_string_to_value(percent_parser()),
 
             gate: FloatParam::new("FfdnGate", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0))),
+                .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+                .with_string_to_value(percent_parser()),
 
-            // ---- FFDN CARD MASTER ENABLES ----------------
-            // All default to `true` so an existing session that never
-            // touched these is bit-identical to the pre- engine.
             space_enabled: BoolParam::new("FfdnSpaceEnabled", true),
             network_enabled: BoolParam::new("FfdnNetworkEnabled", true),
             character_enabled: BoolParam::new("FfdnCharacterEnabled", true),
@@ -1673,6 +2083,10 @@ pub struct PejvakRvbParams {
 
     #[nested(group = "Velvet")]
     pub velvet: VelvetParams,
+    /// Texture chain order, packed one byte per slot. Persisted so a
+    /// reloaded host project restores the user's layer arrangement
+    /// instead of silently reverting to the default order.
+    #[persist = "texture_order"]
     pub texture_order: Arc<AtomicU64>,
 
     #[nested(group = "FFDN")]
@@ -1706,6 +2120,16 @@ pub struct PejvakRvbParams {
     pub default_width: Arc<AtomicU32>,
     #[cfg(feature = "gui-egui")]
     pub default_height: Arc<AtomicU32>,
+
+    /// `true` while the host has the plugin in its active state.
+    /// Set to `false` in `Plugin::deactivate()` and back to `true`
+    /// in `Plugin::activate()`. The editor polls this every frame
+    /// and draws a blocking "PLUGIN DISABLED" overlay while it is
+    /// `false`, so the user gets immediate visual confirmation that
+    /// the DAW has taken the plugin offline (and any parameter
+    /// edits they make won't be audible until it is re-enabled).
+    #[cfg(feature = "gui-egui")]
+    pub plugin_active: Arc<AtomicBool>,
 }
 
 impl Default for PejvakRvbParams {
@@ -1758,6 +2182,8 @@ impl Default for PejvakRvbParams {
             default_width: Arc::new(AtomicU32::new(dw)),
             #[cfg(feature = "gui-egui")]
             default_height: Arc::new(AtomicU32::new(dh)),
+            #[cfg(feature = "gui-egui")]
+            plugin_active: Arc::new(AtomicBool::new(true)),
         }
     }
 }
@@ -1836,7 +2262,6 @@ impl PejvakRvbParams {
 pub struct PejvakRvbPlugin {
     params: Arc<PejvakRvbParams>,
     engine: Option<ReverbController>,
-    mono_scratch: Vec<f32>,
     sample_rate: f32,
     idle: TailIdle,
     last_pushed: [f64; PARAM_COUNT],
@@ -1883,6 +2308,15 @@ pub struct PejvakRvbPlugin {
     /// core. Layout: [mix, rate, steps, octaves, scale, random, grain,
     /// feedback].
     last_illusion: [f64; 8],
+    /// Number of panics caught by `process`'s safety net. The first
+    /// strike wipes the DSP state and continues; a second strike
+    /// latches `engine_dead`.
+    panic_strikes: usize,
+    /// Latched after a second caught panic: `process` outputs silence
+    /// and skips the DSP entirely, so a repeating panic can neither
+    /// keep corrupting the output nor hammer the audio thread with
+    /// panic-hook stderr writes. Cleared by `activate`/`reset`.
+    engine_dead: bool,
 }
 
 impl Default for PejvakRvbPlugin {
@@ -1890,7 +2324,6 @@ impl Default for PejvakRvbPlugin {
         Self {
             params: Arc::new(PejvakRvbParams::default()),
             engine: None,
-            mono_scratch: Vec::new(),
             sample_rate: 48_000.0,
             idle: TailIdle::new(),
             last_pushed: [f64::NAN; PARAM_COUNT],
@@ -1898,6 +2331,8 @@ impl Default for PejvakRvbPlugin {
             last_order_packed: u64::MAX,
             last_illusion: [f64::NAN; 8],
             last_ffdn: [f64::NAN; 30],
+            panic_strikes: 0,
+            engine_dead: false,
         }
     }
 }
@@ -1951,10 +2386,15 @@ impl Plugin for PejvakRvbPlugin {
     ) -> bool {
         self.sample_rate = buffer_config.sample_rate;
         self.idle = TailIdle::new();
+        // A fresh engine is a clean slate: re-arm the panic safety net.
+        self.panic_strikes = 0;
+        self.engine_dead = false;
+
+        #[cfg(feature = "gui-egui")]
+        self.params.plugin_active.store(true, Ordering::Relaxed);
 
         let ctrl = ReverbController::new(buffer_config.sample_rate as i32);
         self.engine = Some(ctrl);
-        self.mono_scratch = vec![0.0; (buffer_config.max_buffer_size as usize).max(8192)];
 
         self.last_pushed = [f64::NAN; PARAM_COUNT];
         self.last_tex = [f64::NAN; TEX_COUNT];
@@ -1971,6 +2411,22 @@ impl Plugin for PejvakRvbPlugin {
             e.clear_buffers();
         }
         self.idle = TailIdle::new();
+        // The host explicitly asked for a state reset — give a
+        // latched-off engine a fresh chance too.
+        self.panic_strikes = 0;
+        self.engine_dead = false;
+    }
+
+    /// Called by the host when the plugin is taken offline
+    /// (DAW "disable" / "deactivate" action, project close, etc.).
+    ///
+    /// We do not do any DSP cleanup here — `clear_buffers` on a
+    /// re-enable is not needed because the host guarantees that the
+    /// next `activate()` will rebuild the engine. We only flip the
+    /// shared flag so the editor can show its disabled overlay.
+    fn deactivate(&mut self) {
+        #[cfg(feature = "gui-egui")]
+        self.params.plugin_active.store(false, Ordering::Relaxed);
     }
 
     fn process(
@@ -1983,12 +2439,42 @@ impl Plugin for PejvakRvbPlugin {
             return ProcessStatus::Normal;
         }
 
+        if self.engine_dead {
+            // Two strikes latched: output silence and skip the DSP
+            // entirely so the repeating panic can't degrade the host's
+            // audio thread any further.
+            for ch in buffer.as_slice() {
+                ch.fill(0.0);
+            }
+            return ProcessStatus::Normal;
+        }
+
         let result =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.process_inner(buffer)));
 
         match result {
             Ok(status) => status,
             Err(_) => {
+                self.panic_strikes += 1;
+                // First strike: wipe every DSP buffer and force a clean
+                // re-push of all parameters, then keep running — a
+                // one-off panic should not kill the plugin. (The
+                // default panic hook writes to stderr on the audio
+                // thread; the two-strike latch bounds that to at most
+                // two writes per engine lifetime.) Second strike:
+                // latch to permanent silence.
+                if let Some(e) = &mut self.engine {
+                    e.clear_buffers();
+                }
+                self.last_pushed = [f64::NAN; PARAM_COUNT];
+                self.last_tex = [f64::NAN; TEX_COUNT];
+                self.last_order_packed = u64::MAX;
+                self.last_illusion = [f64::NAN; 8];
+                self.last_ffdn = [f64::NAN; 30];
+                self.idle = TailIdle::new();
+                if self.panic_strikes >= 2 {
+                    self.engine_dead = true;
+                }
                 for ch in buffer.as_slice() {
                     ch.fill(0.0);
                 }
@@ -2663,10 +3149,8 @@ impl PejvakRvbPlugin {
                     ctrl.process_block_inplace(left, right);
                 }
                 (Some(left), None) => {
-                    let n = left.len().min(self.mono_scratch.len());
-                    total_samples = total_samples.saturating_add(n);
-                    self.mono_scratch[..n].copy_from_slice(&left[..n]);
-                    ctrl.process_mono_inplace(&mut left[..n]);
+                    total_samples = total_samples.saturating_add(left.len());
+                    ctrl.process_mono_inplace(&mut left[..]);
                 }
                 _ => {}
             }
@@ -2731,3 +3215,101 @@ impl ClapPlugin for PejvakRvbPlugin {
 
 nice_export_vst3!(PejvakRvbPlugin);
 nice_export_clap!(PejvakRvbPlugin);
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The display → parse pair must round-trip for every sampled
+    /// LineDecay value. Regression guard for the `ms`-suffix asymmetry:
+    /// LineDecay is stored in seconds but displayed in milliseconds
+    /// below one second.
+    ///
+    /// The comparison happens on the *normalised* 0..1 axis, where the
+    /// error sources are uniform: the parse bisects through the
+    /// 4001-entry value table (one step = 2.5e-4) and the display
+    /// rounds to 0.5 ms / 0.01 s (worth up to ≈ 1.2e-3 normalised at
+    /// the low end, where the curve is flat). A 3e-3 bound sits well
+    /// above both — and far below the old bug, where "54 ms" parsed
+    /// back as 54 *seconds* (an error of ≈ 0.99).
+    #[test]
+    fn line_decay_display_parse_round_trip() {
+        let mut saw_ms_branch = false;
+        let mut saw_s_branch = false;
+        for i in 0..=100 {
+            let n = i as f32 / 100.0;
+            let s = display_parameter(16, n);
+            let parsed = parse_parameter(16, &s).expect("displayed value must parse");
+            assert!(
+                (parsed - n).abs() < 3e-3,
+                "LineDecay '{s}': normalized {} parsed back as {parsed}",
+                n
+            );
+            if s.contains("ms") {
+                saw_ms_branch = true;
+            }
+            if s.contains('s') && !s.contains("ms") {
+                saw_s_branch = true;
+            }
+        }
+        assert!(saw_ms_branch, "test never exercised the ms display branch");
+        assert!(saw_s_branch, "test never exercised the s display branch");
+    }
+
+    /// Typing the displayed "800 ms" must give 0.8 seconds of decay —
+    /// not saturate at the 60 s maximum (the pre-fix behaviour). The
+    /// parse resolves through the value table, so the check is done at
+    /// the physical level with one table step (≈ 2 ms here) of slack.
+    #[test]
+    fn typed_ms_value_is_interpreted_as_milliseconds() {
+        let norm = parse_parameter(16, "800 ms").expect("parse");
+        let seconds = scaled_parameter_value(16, norm as f64);
+        assert!(
+            (seconds - 0.8).abs() < 2e-3,
+            "'800 ms' parsed as {seconds} s"
+        );
+    }
+
+    /// Parameters that are genuinely stored in milliseconds (PreDelay)
+    /// must keep interpreting "250 ms" as 250 — a global `ms` division
+    /// would break them.
+    #[test]
+    fn millisecond_params_stay_in_milliseconds() {
+        let norm = parse_parameter(1, "250 ms").expect("parse");
+        let ms = scaled_parameter_value(1, norm as f64);
+        assert!((ms - 250.0).abs() < 1e-6, "'250 ms' parsed as {ms} ms");
+    }
+
+    /// Unit handling: dB, %, -inf, and the on/off/pre/post keywords.
+    #[test]
+    fn parse_known_units_and_keywords() {
+        // TapGain (index 8): "-6.0 dB" → linear gain 10^(-6/20).
+        let gain = parse_parameter(8, "-6.0 dB").expect("parse");
+        let linear = scaled_parameter_value(8, gain as f64);
+        let expected = 10.0_f64.powf(-6.0 / 20.0);
+        assert!((linear - expected).abs() < 1e-6);
+
+        // WidthOut (index 41): "150 %" → 1.5.
+        let width = parse_parameter(Parameter::WidthOut as usize, "150 %").expect("parse");
+        let physical = scaled_parameter_value(Parameter::WidthOut as usize, width as f64);
+        assert!((physical - 1.5).abs() < 1e-9);
+
+        // "-inf" and the keywords.
+        assert_eq!(parse_parameter(16, "-inf"), Some(0.0));
+        assert_eq!(parse_parameter(4, "on"), Some(1.0));
+        assert_eq!(parse_parameter(4, "off"), Some(0.0));
+        assert_eq!(parse_parameter(47, "pre"), Some(0.0));
+        assert_eq!(parse_parameter(47, "post"), Some(1.0));
+    }
+
+    /// Garbage input must be rejected, not coerced.
+    #[test]
+    fn parse_rejects_garbage() {
+        assert_eq!(parse_parameter(16, "hello"), None);
+        assert_eq!(parse_parameter(16, ""), None);
+    }
+}

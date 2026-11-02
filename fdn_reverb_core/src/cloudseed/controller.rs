@@ -266,7 +266,10 @@ impl ReverbController {
         // FFDN input-stage filters. Same buffer sizes and defaults
         // as the CloudSeed channels' internal copies.
         let sr = samplerate as f64;
-        let max_pre_delay_samples = (sr * 1.0) as usize; // 1 s headroom
+        // 1 s + 2 samples of headroom: the PreDelay parameter may
+        // request exactly `sr` samples at its 1000 ms maximum, and the
+        // two-tap interpolation needs `delay + 1 < len`.
+        let max_pre_delay_samples = (sr * 1.0) as usize + 2;
         let ffdn_pre_delay_l = ModulatedDelay::new(BUFFER_SIZE, max_pre_delay_samples, 100);
         let ffdn_pre_delay_r = ModulatedDelay::new(BUFFER_SIZE, max_pre_delay_samples, 100);
         let ffdn_hp_l = Hp1::new(sr);
@@ -376,7 +379,12 @@ impl ReverbController {
         self.ffdn_lp_r.set_samplerate(sr);
 
         // Pre-delay length is stored in samples, so recompute from
-        // the persisted millisecond value.
+        // the persisted millisecond value. The buffers are sized from
+        // the sample rate, so reallocate them first.
+        self.ffdn_pre_delay_l
+            .set_delay_buffer_samples((sr * 1.0) as usize + 2);
+        self.ffdn_pre_delay_r
+            .set_delay_buffer_samples((sr * 1.0) as usize + 2);
         let predelay_ms = scaled_parameter_value(1, self.parameters[1]);
         let samples = (predelay_ms / 1000.0 * sr) as usize;
         self.ffdn_pre_delay_l.sample_delay = samples;
@@ -1131,8 +1139,7 @@ impl ReverbController {
             self.smoothed_wet_gain = wet_target;
         }
         for i in 0..n {
-            self.smoothed_wet_gain +=
-                self.smooth_coeff * (wet_target - self.smoothed_wet_gain);
+            self.smoothed_wet_gain += self.smooth_coeff * (wet_target - self.smoothed_wet_gain);
             self.ffdn_buf_l[i] *= self.smoothed_wet_gain;
             self.ffdn_buf_r[i] *= self.smoothed_wet_gain;
         }
@@ -1185,10 +1192,8 @@ impl ReverbController {
             self.smoothed_width = width_target;
         }
         for i in 0..n {
-            self.smoothed_dry_gain +=
-                self.smooth_coeff * (dry_target - self.smoothed_dry_gain);
-            self.smoothed_width +=
-                self.smooth_coeff * (width_target - self.smoothed_width);
+            self.smoothed_dry_gain += self.smooth_coeff * (dry_target - self.smoothed_dry_gain);
+            self.smoothed_width += self.smooth_coeff * (width_target - self.smoothed_width);
             self.smooth_dry_scratch[i] = self.smoothed_dry_gain;
             self.smooth_width_scratch[i] = self.smoothed_width;
         }
@@ -1502,5 +1507,33 @@ impl ReverbController {
     }
     pub fn set_illusion_grain(&mut self, v: f64) {
         self.illusion.set_grain_norm(v);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression: PreDelay at its 1000 ms maximum used to set
+    /// `sample_delay == delay_buffer.len()`, which collapsed the delay
+    /// to zero in release builds and tripped `wrap_sub`'s debug
+    /// assertion in debug builds. The pre-delay buffers now carry two
+    /// samples of headroom, so the maximum must process cleanly at any
+    /// sample rate.
+    #[test]
+    fn pre_delay_maximum_processes_cleanly() {
+        for &sr in &[44_100i32, 48_000, 96_000, 192_000] {
+            let mut ctrl = ReverbController::new(sr);
+            ctrl.set_parameter(1, 1.0); // PreDelay = 1000 ms (maximum)
+            let mut l: Vec<f32> = (0..BUFFER_SIZE)
+                .map(|i| ((i % 100) as f32) * 0.01)
+                .collect();
+            let mut r = l.clone();
+            ctrl.process_block_inplace(&mut l, &mut r);
+            assert!(
+                l.iter().all(|v| v.is_finite()) && r.iter().all(|v| v.is_finite()),
+                "non-finite output at {sr} Hz"
+            );
+        }
     }
 }

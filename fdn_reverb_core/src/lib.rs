@@ -6,9 +6,9 @@
 //! identical sound to the C++ original.
 //!
 //! On top of the CloudSeed port, this crate also hosts the PEJVAK
-//! Texture Rack — a set of post-reverb texture layers (Shimmer, Crystal,
-//! Mist, Scatter, Drift, Ghost) that transform the wet tail into a
-//! hybrid reverb.
+//! Texture Rack — a set of post-reverb texture layers (Shimmer,
+//! Crystal, Mist, Scatter, Drift, Bloom) that transform the wet tail
+//! into a hybrid reverb.
 
 pub mod cloudseed;
 pub mod ffdn;

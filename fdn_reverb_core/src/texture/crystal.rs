@@ -109,9 +109,10 @@ impl Crystal {
             start_b: 0.0,
             grain_len_b: (MIN_GRAIN_MS * samplerate / 1000.0).max(32.0),
             next_b: 0.0,
-            // Seed from the instance address so different channels /
-            // instances don't share the exact same random sequence.
-            rng_state: 0x9E37_79B9_7F4A_7C15,
+            // Seeded from a global instance counter (see
+            // `texture::instance_seed`) so two instances of the plugin
+            // in the same process never share the same grain sequence.
+            rng_state: crate::texture::instance_seed(0x9E37_79B9_7F4A_7C15),
             hp_state_l: 0.0,
             hp_state_r: 0.0,
             hp_coeff: 0.0,
@@ -370,7 +371,6 @@ impl TextureLayer for Crystal {
 }
 
 impl Crystal {
-
     pub fn set_grain_len_norm(&mut self, v: f64) {
         self.grain_len_norm = v.clamp(0.0, 1.0);
         self.update_grain_len();

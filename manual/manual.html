@@ -44,10 +44,6 @@
 * { box-sizing: border-box; }
 html {
   scroll-behavior: smooth;
-  /* Offset anchor navigation by the actual header height so a
-     clicked TOC link lands below the sticky header rather than
-     underneath it. `--header-h` is kept up to date by the JS at
-     the bottom of this file. */
   scroll-padding-top: calc(var(--header-h) + 16px);
 }
 body {
@@ -94,9 +90,6 @@ aside::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; 
   max-width: 170px;
   height: auto;
   margin: 0 auto 14px;
-  /* The logo is white on transparent, so it reads well on the dark
-     sidebar as-is. In light mode we invert it to keep the same
-     contrast. */
 }
 :root.light .brand-logo {
   filter: invert(1);
@@ -130,27 +123,18 @@ nav a.sub { padding-left: 28px; font-size: 12.5px; }
 /* ---- Main ---- */
 main { padding: 0 64px 120px; max-width: 900px; }
 
-/* Sticky header: stays pinned to the top of the viewport while the
-   document scrolls. The negative horizontal margin extends the
-   background to the full width of `main` so no content bleeds
-   through the padding; the backdrop-filter gives a subtle frosted
-   glass effect so the header remains readable over any content. */
-   header.top {
-     position: sticky;
-     top: 0;
-     z-index: 100;
-     margin: 0 -64px 40px -64px;
-     padding: 32px 64px 16px 64px;
-     /* Semi-transparent background — the blur behind it creates the
-        "frosted glass" effect the user requested. `saturate(140%)`
-        makes the blurred content feel more vivid, which reads as
-        more "glassy" than plain blur alone. */
-     background: var(--header-bg);
-     border-bottom: 1px solid var(--border);
-     backdrop-filter: blur(12px) saturate(140%);
-     -webkit-backdrop-filter: blur(12px) saturate(140%);
-     transition: background 0.25s, border-color 0.25s;
-   }
+header.top {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  margin: 0 -64px 40px -64px;
+  padding: 32px 64px 16px 64px;
+  background: var(--header-bg);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  transition: background 0.25s, border-color 0.25s;
+}
 h1 {
   font-size: 32px;
   margin: 0 0 8px;
@@ -208,7 +192,6 @@ h1 {
   font-size: 15px;
   pointer-events: none;
 }
-/* Result counter inside the input, on the right. */
 .search-count {
   position: absolute;
   right: 62px;
@@ -219,7 +202,6 @@ h1 {
   color: var(--fg-3);
   pointer-events: none;
 }
-/* Prev / next navigation arrows. */
 .search-nav {
   position: absolute;
   right: 6px;
@@ -471,7 +453,7 @@ mark.hit.current {
   <div class="brand">
     <img src="logo.png" alt="PEJVAK DSP" class="brand-logo">
     PEJVAK RVB
-    <small>User Manual · v1.0.1</small>
+    <small>User Manual · v1.1.0</small>
   </div>
   <nav id="toc">
     <a href="#intro">1. Introduction</a>
@@ -483,6 +465,8 @@ mark.hit.current {
     <a href="#menu" class="sub">4.2 Menu ☰</a>
     <a href="#presets" class="sub">4.3 Preset Browser</a>
     <a href="#undo" class="sub">4.4 Undo / Redo</a>
+    <a href="#check-updates" class="sub">4.5 Check for Updates</a>
+    <a href="#disabled" class="sub">4.6 Plugin Disabled Overlay</a>
     <a href="#cloudseed">5. CloudSeed Engine</a>
     <a href="#cs-input" class="sub">5.1 INPUT</a>
     <a href="#cs-multitap" class="sub">5.2 MULTITAP DELAY</a>
@@ -523,7 +507,7 @@ mark.hit.current {
 
 <header class="top">
   <h1>PEJVAK RVB</h1>
-  <div class="meta">Hybrid Algorithmic Reverb · Version 1.0.1 · GPL-3.0-or-later</div>
+  <div class="meta">Hybrid Algorithmic Reverb · Version 1.1.0 · GPL-3.0-or-later</div>
   <div class="toolbar">
     <div class="search-wrap">
       <input id="search" type="text" placeholder="Search the manual…" autocomplete="off"
@@ -561,6 +545,7 @@ mark.hit.current {
   <li><strong>ILLUSION</strong> — a granular cloud with pitched overtones and eight techniques that keep it click-free.</li>
   <li><strong>Velvet-Noise VFDN</strong> — a sparse diffusion stage inside the CloudSeed engine.</li>
   <li><strong>Undo / Redo</strong> — 50 steps with parameter-name tooltips.</li>
+  <li><strong>Check for Updates</strong> — built-in updater with SHA-256 verified installer downloads.</li>
   <li><strong>100 factory presets</strong> across 16 categories.</li>
 </ul>
 </section>
@@ -568,58 +553,72 @@ mark.hit.current {
 <!-- ============ 2. INSTALLATION ============ -->
 <section id="install">
 <h2>2. Installation</h2>
-<p>PEJVAK RVB ships as a single binary that is valid as both a VST3 and a CLAP plugin. Supported platforms are <strong>Windows</strong> (x86-64), <strong>macOS</strong> (Intel + Apple Silicon, universal binary), and <strong>Linux</strong> (x86-64).</p>
+<p>Download the installer for your platform from the <a href="https://github.com/Pejvak-DSP/PejvakRVB/releases" target="_blank" rel="noopener">GitHub Releases</a> page. Every release ships a native installer that handles the platform-specific quirks (Mark-of-the-Web on Windows, Gatekeeper on macOS) automatically.</p>
 
 <h3>Windows</h3>
-<p>Copy the plugin file to the appropriate system folder:</p>
-
-<h4>CLAP</h4>
-<div class="diagram">C:\Program Files\Common Files\CLAP\Pejvak_RVB.clap</div>
-
-<h4>VST3</h4>
-<div class="diagram">C:\Program Files\Common Files\VST3\PEJVAK RVB\Pejvak_RVB.vst3</div>
-
-<p>Then rescan plugins in your DAW. Depending on your host, you may need to restart it.</p>
-
-<h3>macOS</h3>
-<p>The macOS build is a <strong>universal binary</strong> — it runs natively on both Apple Silicon (M1/M2/M3/M4) and Intel Macs. No Rosetta required.</p>
-
-<h4>CLAP</h4>
-<div class="diagram">~/Library/Audio/Plug-Ins/CLAP/Pejvak_RVB.clap</div>
-
-<h4>VST3</h4>
-<div class="diagram">~/Library/Audio/Plug-Ins/VST3/PEJVAK RVB.vst3</div>
-
-<p>You can also install the VST3 system-wide for all users:</p>
-<div class="diagram">/Library/Audio/Plug-Ins/VST3/PEJVAK RVB.vst3</div>
+<p>Download and run <code>PEJVAK-RVB-windows-x64-setup.exe</code>. The self-extracting installer:</p>
+<ol>
+  <li>Removes the Windows security block (<em>Mark of the Web</em>) from the bundled plugin files.</li>
+  <li>Creates the VST3 and CLAP system directories if they do not exist.</li>
+  <li>Copies <code>PEJVAK RVB.vst3</code> and <code>Pejvak_RVB.clap</code> into their respective folders:
+    <div class="diagram">C:\Program Files\Common Files\VST3\PEJVAK RVB\
+C:\Program Files\Common Files\CLAP\</div>
+  </li>
+  <li>Pauses for confirmation once installation completes.</li>
+</ol>
 
 <div class="note">
-The first time you load the plugin, macOS may show a security warning
-because the binary is not notarized. To allow it:
+If Windows SmartScreen shows a warning about the installer, click
+<strong>More info → Run anyway</strong>. The installer is not yet
+Authenticode-signed; the SHA-256 verification in the built-in updater
+guarantees integrity even without code signing. The SmartScreen warning
+will disappear once the installer receives a code-signing certificate.
+</div>
+
+<h3>macOS (Universal Binary)</h3>
+<p>Download and double-click <code>PEJVAK-RVB-macos-universal.pkg</code>. This is a standard Apple package installer that:</p>
+<ol>
+  <li>Installs the VST3 and CLAP bundles into <code>~/Library/Audio/Plug-Ins/</code>.</li>
+  <li>Removes the Gatekeeper quarantine attribute from both plugins.</li>
+</ol>
+<p>The package is <strong>universal</strong> — it runs natively on both Apple Silicon (M1/M2/M3/M4) and Intel Macs. No Rosetta required.</p>
+
+<div class="note">
+If macOS still blocks the plugin the first time you load it in your DAW:
 <strong>System Settings → Privacy &amp; Security → "Open Anyway"</strong>.
-This is only necessary once per installation.
+This is only necessary once, and only when the package has not been
+notarized. The PKG installer already removes the quarantine attribute,
+so in most cases you will not see this dialog at all.
 </div>
 
 <h3>Linux</h3>
-<p>Copy the plugin file to your user plugin folders:</p>
+<p>Download <code>PEJVAK-RVB-linux-x64.tar.gz</code> and extract it. Then install manually:</p>
+<div class="diagram"># VST3
+mkdir -p ~/.vst3/"PEJVAK RVB.vst3"/Contents/x86_64-linux
+cp "PEJVAK RVB.vst3/Contents/x86_64-linux/PEJVAK RVB.so" \
+   ~/.vst3/"PEJVAK RVB.vst3"/Contents/x86_64-linux/
 
-<h4>CLAP</h4>
-<div class="diagram">~/.clap/Pejvak_RVB.clap</div>
-
-<h4>VST3</h4>
-<div class="diagram">~/.vst3/PEJVAK RVB.vst3</div>
-
-<p>For a system-wide install (requires root):</p>
-<div class="diagram">/usr/lib/clap/Pejvak_RVB.clap
-/usr/lib/vst3/PEJVAK RVB.vst3</div>
-
+# CLAP
+mkdir -p ~/.clap
+cp Pejvak_RVB.clap ~/.clap/</div>
 <p>Then rescan plugins in your DAW (or restart it).</p>
 
 <div class="note">
-On Linux the plugin uses the system's default audio stack. Make sure your
-DAW's sandbox (if any) allows the plugin to run outside the sandbox, or
-install the plugin in the same path the DAW scans.
+The Linux build is compiled against the current Ubuntu LTS toolchain. It
+requires the standard <code>libx11</code>, <code>libxcb</code>,
+<code>libgl1</code>, and <code>libasound2</code> packages, which are
+almost always present on a desktop system.
 </div>
+
+<h3>Updating</h3>
+<p>Once installed, use the <strong>☰ → Check for updates</strong> option inside the plugin. It will:</p>
+<ol>
+  <li>Query the GitHub Releases API and compare the remote tag against the installed version.</li>
+  <li>Show the release notes for any newer version.</li>
+  <li>Download the appropriate installer for your platform (with SHA-256 verification).</li>
+  <li>Offer a button to run the installer once you have closed your DAW.</li>
+</ol>
+<p>See <a href="#check-updates">§4.5</a> for details.</p>
 
 <h3>System requirements</h3>
 <table>
@@ -675,7 +674,11 @@ lipo -create \
 cargo nice-plug bundle Pejvak_RVB --release</div>
 
 <h3>Run the test suite</h3>
-<div class="diagram">cargo test -p fdn_reverb_core</div>
+<div class="diagram"># 42 DSP tests
+cargo test -p fdn_reverb_core
+
+# 11 plugin tests (XML parser, parameter handling, updater)
+cargo test -p Pejvak_RVB</div>
 
 <div class="tip">
 The DSP core (<code>fdn_reverb_core</code>) has no OS-specific code, so
@@ -731,21 +734,22 @@ The fastest way to hear the difference between the two engines is to load the sa
   <tr><td>MAIN | TEXTURE</td><td>Switch between the reverb engine page and the Texture Rack page.</td></tr>
   <tr><td>TX</td><td>Kill switch — locks all seven Texture layers off in one click. See <a href="#tx">§9</a>.</td></tr>
   <tr><td>CLOUD | FFDN</td><td>Selects the active reverb engine. Switching clears the departing engine's buffers so no stale tail bleeds through.</td></tr>
-  <tr><td>Bypass</td><td>Host-integrated bypass — the plugin passes audio through untouched.</td></tr>
+  <tr><td>Bypass</td><td>Host-integrated bypass — the plugin passes audio through untouched. The button gently <em>breathes</em> at 1.5 Hz while bypass is engaged, so you can tell at a glance that you are hearing the dry signal.</td></tr>
   <tr><td>Freeze</td><td>Holds the current reverb tail indefinitely. New input is rejected; existing sound keeps circulating.</td></tr>
   <tr><td>Interp</td><td>Enables delay-line interpolation (smoother modulation at a small CPU cost). CloudSeed only.</td></tr>
   <tr><td>↶ ↷</td><td>Undo / Redo. Hover shows which parameters the next action will affect. See <a href="#undo">§4.4</a>.</td></tr>
   <tr><td>Preset ▾</td><td>Opens the preset browser. The ◀ ▶ arrows step through presets without opening the list.</td></tr>
-  <tr><td>☰</td><td>Plugin menu — Manual, Size, About, Show pop-ups. See <a href="#menu">§4.2</a>.</td></tr>
+  <tr><td>☰</td><td>Plugin menu — Manual, Size, About, Check for updates, Show pop-ups. See <a href="#menu">§4.2</a>.</td></tr>
   <tr><td>☾ / ☀</td><td>Toggles the plugin theme between dark and light.</td></tr>
 </table>
 
 <h3 id="menu">4.2 Menu ☰</h3>
-<p>Four items:</p>
+<p>Five items:</p>
 <ul>
   <li><strong>Manual</strong> — opens this document in your browser.</li>
   <li><strong>Size</strong> — a hover flyout listing UI-scale presets from 70 % to 200 %. The bottom of the list has <em>Set as default size</em>, which saves the current window size for future plugin instances.</li>
   <li><strong>About</strong> — version information and build details.</li>
+  <li><strong>Check for updates</strong> — queries GitHub for a newer release. See <a href="#check-updates">§4.5</a>.</li>
   <li><strong>Show pop-ups</strong> — toggles all hover tooltips on and off. Useful for screen recordings where tooltip flicker is distracting. The setting is remembered across sessions.</li>
 </ul>
 
@@ -754,7 +758,7 @@ The fastest way to hear the difference between the two engines is to load the sa
 <ul>
   <li><strong>Search box</strong> — filters the visible list as you type.</li>
   <li><strong>Init</strong> — loads the factory default state.</li>
-  <li><strong>Save Preset…</strong> — writes the current state to a user XML file in <code>%APPDATA%\PEJVAK RVB\Presets\</code>.</li>
+  <li><strong>Save Preset…</strong> — writes the current state to a user XML file in <code>%APPDATA%\PEJVAK RVB\Presets\</code> (Windows) or <code>~/.config/PEJVAK RVB/Presets/</code> (macOS / Linux).</li>
   <li><strong>Load Preset…</strong> — reads a user XML preset from disk.</li>
   <li><strong>User Presets</strong> — a section listing every <code>.xml</code> file you have saved.</li>
 </ul>
@@ -769,7 +773,49 @@ Loading a preset from an older version is safe: the XML format is append-only, a
   <li><strong>One drag = one undo step.</strong> Dragging a knob from 0 to 100 creates a single history entry, not a hundred.</li>
   <li><strong>Engine and page switches do not create entries on their own.</strong> But if you change a parameter on FFDN and press Undo, you are returned to FFDN automatically.</li>
   <li><strong>Tooltips tell you what will change.</strong> Hover over ↶ or ↷ to see a summary such as <em>Undo: Size, Decay</em>.</li>
+  <li><strong>Undo never cuts the reverb tail.</strong> A parameter jump is smoothed in the DSP over ~10 ms rather than by resetting the reverb buffers.</li>
 </ul>
+
+<h3 id="check-updates">4.5 Check for Updates</h3>
+<p>Select <strong>☰ → Check for updates</strong> to open the updater. It performs four steps:</p>
+<ol>
+  <li><strong>Check</strong> — queries <code>https://api.github.com/repos/Pejvak-DSP/PejvakRVB/releases/latest</code>, compares the tag against the installed version, and shows the release notes for any newer version.</li>
+  <li><strong>Download</strong> — pulls the installer for the current platform:
+    <div class="diagram">Windows: PEJVAK-RVB-windows-x64-setup.exe
+macOS:   PEJVAK-RVB-macos-universal.pkg
+Linux:   PEJVAK-RVB-linux-x64.tar.gz</div>
+  </li>
+  <li><strong>Verify</strong> — computes the SHA-256 of the downloaded file as it streams, then compares it against the immutable digest published by GitHub. A mismatch deletes the partial file and refuses the install. A release that does not carry a digest is also rejected.</li>
+  <li><strong>Install</strong> — shows a <em>Open Installer</em> button. You must tick an explicit confirmation checkbox before the plugin will run a downloaded binary.</li>
+</ol>
+
+<div class="warn">
+Close your DAW <strong>before</strong> running the installer. The plugin
+file is locked while the DAW has it loaded, so the installer cannot
+replace it until the host has released the file handle.
+</div>
+
+<div class="note">
+The updater is designed to be safe by default:
+<ul>
+  <li><strong>HTTPS-only</strong> requests — a malicious mirror cannot downgrade the connection to plaintext.</li>
+  <li><strong>SHA-256 verification</strong> against GitHub's immutable digest.</li>
+  <li><strong>Explicit confirmation</strong> before launching the installer.</li>
+</ul>
+</div>
+
+<h3 id="disabled">4.6 Plugin Disabled Overlay</h3>
+<p>When your DAW takes the plugin <em>offline</em> (in Ableton this is <strong>Deactivate</strong>, in Bitwig <strong>Suspend</strong>, in Reaper <strong>Offline</strong> — the exact name varies), the plugin's UI dims and displays a full-window overlay with the message:</p>
+<div class="diagram">PLUGIN DISABLED
+Enable the plugin in your DAW to resume editing.</div>
+<p>The overlay blocks every click, so you cannot accidentally edit a parameter that would not be heard. It disappears as soon as the host reactivates the plugin.</p>
+
+<div class="note">
+This overlay is <strong>not</strong> the same as the internal Bypass button.
+Bypass is a plugin parameter that passes audio through; Deactivate is a
+host operation that stops the plugin from processing entirely. The
+overlay only appears for the latter.
+</div>
 </section>
 
 <!-- ============ 5. CLOUDSEED ============ -->
@@ -1048,13 +1094,13 @@ Placing SHIMMER last produces a smooth, top-down wash. Placing it first adds the
 
 <table>
   <tr><th>Control</th><th>Range</th><th>Description</th></tr>
-  <tr><td>Spark</td><td>0 – 100 %</td><td>Granular cloud amount. 0 % = bypass.</td></tr>
+  <tr><td>Spark</td><td>0 – 100 %</td><td>Granular cloud amount. 0 % = bypass. On the rising edge from exactly 0 the cloud fades in over one second, so a very small Spark value never "snaps on" as a distinctive texture.</td></tr>
   <tr><td>Still</td><td>0 – 100 %</td><td>Motion smoothness. 0 % = scattered; 100 % = calm, meditative.</td></tr>
   <tr><td>Aura</td><td>−24 – +24 st</td><td>Pitch shift. At 0 st the internal sequence plays. Any non-zero value overrides the sequence with a fixed transposition.</td></tr>
   <tr><td>Veil</td><td>0 – 85 %</td><td>Feedback into the capture buffer. Higher = repeating patterns, hazy wash.</td></tr>
   <tr><td>Wide</td><td>0 – 200 %</td><td>Stereo width of the wet signal.</td></tr>
   <tr><td>Tint</td><td>800 – 18 000 Hz</td><td>Tone of the wet signal.</td></tr>
-  <tr><td>Rate</td><td>0.5 – 8 Hz</td><td>Clock speed. 0.5 Hz = very slow; 8 Hz = fast arpeggio.</td></tr>
+  <tr><td>Rate</td><td>0.5 – 10 Hz</td><td>Clock speed. 0.5 Hz = very slow; 10 Hz = fast arpeggio.</td></tr>
   <tr><td>Grain</td><td>30 – 300 ms</td><td>Length of each grain. Longer = smoother and more legato.</td></tr>
 </table>
 
@@ -1111,6 +1157,14 @@ Placing SHIMMER last produces a smooth, top-down wash. Placing it first adds the
   <tr><td>FfdnDrive</td><td>Saturation</td><td>Amount of Velvet saturation applied inside the FFDN feedback loop.</td></tr>
   <tr><td>FfdnDriveEnabled</td><td>SaturationEnabled</td><td>Enable switch for the saturation stage.</td></tr>
 </table>
+
+<h3>Smoothing</h3>
+<p>All output-stage gains are smoothed inside the DSP with a 10 ms one-pole time constant. This means:</p>
+<ul>
+  <li>Automating a fader in the DAW never produces zipper noise.</li>
+  <li>Dragging a fader by hand produces a smooth amplitude ramp, not a staircase.</li>
+  <li>Preset loads still take effect instantly (the smoothing stage snaps on the first sample).</li>
+</ul>
 </section>
 
 <!-- ============ 12. TROUBLESHOOTING ============ -->
@@ -1119,9 +1173,10 @@ Placing SHIMMER last produces a smooth, top-down wash. Placing it first adds the
 
 <h3>No sound / plugin not passing audio</h3>
 <ul>
-  <li>Check that the <strong>Bypass</strong> switch in the header is off.</li>
+  <li>Check that the <strong>Bypass</strong> switch in the header is off (if it is pulsing, bypass is engaged).</li>
   <li>Check that the <strong>Dry</strong> fader in MIXER is not at −inf.</li>
   <li>Check that the input is not being rejected by an aggressive Low Cut or High Cut.</li>
+  <li>If you see a <strong>PLUGIN DISABLED</strong> overlay, the DAW has taken the plugin offline — reactivate it in the host.</li>
 </ul>
 
 <h3>Reverb tail is too short</h3>
@@ -1144,8 +1199,16 @@ Placing SHIMMER last produces a smooth, top-down wash. Placing it first adds the
   <li>Make sure your host's plugin sandbox is enabled. If the plugin misbehaves, a sandboxed instance can be killed without taking the host down.</li>
 </ul>
 
+<h3>Check for Updates fails</h3>
+<ul>
+  <li><strong>"No internet connection"</strong> — the updater needs to reach <code>api.github.com</code>. Check your firewall or proxy settings.</li>
+  <li><strong>"No installer found for this platform"</strong> — this release does not ship an asset matching your OS. Use the <em>Open Releases Page</em> fallback and install manually.</li>
+  <li><strong>"SHA-256 mismatch"</strong> — the download was corrupted or tampered with. Try again. If it fails repeatedly, download from the GitHub Releases page directly.</li>
+  <li><strong>"No SHA-256 digest available"</strong> — the release predates GitHub's digest field. This is a rare case; install manually.</li>
+</ul>
+
 <h3>macOS: "Plugin cannot be opened because the developer cannot be verified"</h3>
-<p>This is standard Gatekeeper behaviour for unsigned binaries. To allow the plugin the first time:</p>
+<p>This is standard Gatekeeper behaviour for unsigned binaries. The PKG installer already removes the quarantine attribute, but if your DAW still blocks the plugin:</p>
 <ul>
   <li>Open <strong>System Settings</strong> → <strong>Privacy &amp; Security</strong>.</li>
   <li>Scroll down to the security section. You should see a message about <code>PEJVAK RVB</code> being blocked.</li>
@@ -1155,14 +1218,9 @@ Placing SHIMMER last produces a smooth, top-down wash. Placing it first adds the
 
 <h3>macOS: plugin does not appear in the DAW after installation</h3>
 <ul>
-  <li>Confirm you copied the plugin to the correct folder for your DAW
-      (<code>~/Library/Audio/Plug-Ins/VST3/</code> for user-level or
-      <code>/Library/Audio/Plug-Ins/VST3/</code> for system-level).</li>
-  <li>Some DAWs (Ableton, Reaper, Bitwig) require you to add the folder to
-      their plugin search path manually.</li>
-  <li>Rescan plugins from the DAW's preferences. On Logic Pro, use
-      <strong>Logic Pro → Settings → Plug-in Manager</strong> and click
-      <strong>Reset &amp; Rescan Selection</strong>.</li>
+  <li>Confirm the PKG installed the plugin to <code>~/Library/Audio/Plug-Ins/VST3/</code> (user) or <code>/Library/Audio/Plug-Ins/VST3/</code> (system).</li>
+  <li>Some DAWs (Ableton, Reaper, Bitwig) require you to add the folder to their plugin search path manually.</li>
+  <li>Rescan plugins from the DAW's preferences. On Logic Pro, use <strong>Logic Pro → Settings → Plug-in Manager</strong> and click <strong>Reset &amp; Rescan Selection</strong>.</li>
 </ul>
 
 <h3>Linux: plugin fails to load with "libGL" or "libX11" errors</h3>
@@ -1180,6 +1238,9 @@ you see rendering glitches, try launching the DAW with XWayland:</p>
 
 <h3>Tooltips get in the way</h3>
 <p>Open the ☰ menu and toggle <strong>Show pop-ups</strong> off. All hover tooltips will be suppressed until you toggle it back on.</p>
+
+<h3>Windows SmartScreen warns about the installer</h3>
+<p>Click <strong>More info → Run anyway</strong>. The installer is not yet Authenticode-signed, so SmartScreen shows a warning the first time you run it. This is expected; the SHA-256 verification in the built-in updater guarantees integrity even without code signing.</p>
 </section>
 
 <!-- ============ 13. CREDITS ============ -->
@@ -1230,6 +1291,7 @@ you see rendering glitches, try launching the DAW with XWayland:</p>
   <li>nice-plug 0.4.2 — plugin framework</li>
   <li>egui 0.36 — user interface</li>
   <li>wide 1.6 — portable SIMD</li>
+  <li>ureq 2.10 — HTTPS client for the built-in updater</li>
 </ul>
 
 <h3>License</h3>
@@ -1284,15 +1346,7 @@ you see rendering glitches, try launching the DAW with XWayland:</p>
   );
   sections.forEach((s) => observer.observe(s));
 
-  // ---- Professional search ----------------------------------------
-  //
-  // Features:
-  //   * Live search as you type (120 ms debounce).
-  //   * Match counter inside the input (n / total).
-  //   * Enter / Shift+Enter to jump between matches.
-  //   * Previous / next buttons in the toolbar.
-  //   * Current match is visually stronger than the rest.
-  //   * Ctrl+F focuses the box; Escape clears it.
+  // ---- Professional search ----
   const search = document.getElementById('search');
   const searchInfo = document.getElementById('searchInfo');
   const searchCount = document.getElementById('searchCount');
@@ -1300,13 +1354,6 @@ you see rendering glitches, try launching the DAW with XWayland:</p>
   const searchNext = document.getElementById('searchNext');
   const main = document.querySelector('main');
 
-  // ---- Keep --header-h in sync with the real header height --------
-  // The header is `position: sticky` and its height varies with the
-  // viewport (the toolbar can wrap to two rows on narrow screens).
-  // The CSS `scroll-padding-top` on <html> and `scroll-margin-top`
-  // on every <section> consume this variable so that clicking a TOC
-  // link never hides the section title under the header. We measure
-  // it at load and whenever the viewport is resized.
   function updateHeaderHeight() {
     const header = document.querySelector('header.top');
     if (!header) return;
@@ -1445,7 +1492,6 @@ you see rendering glitches, try launching the DAW with XWayland:</p>
   searchPrev.addEventListener('click', () => focusMark(currentMarkIndex - 1));
   searchNext.addEventListener('click', () => focusMark(currentMarkIndex + 1));
 
-  // ---- Keyboard shortcuts ----
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
       e.preventDefault();
@@ -1459,7 +1505,6 @@ you see rendering glitches, try launching the DAW with XWayland:</p>
     }
   });
 
-  // ---- Back to top button ----
   const backToTop = document.getElementById('backToTop');
   window.addEventListener('scroll', () => {
     backToTop.classList.toggle('visible', window.scrollY > 400);

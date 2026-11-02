@@ -79,6 +79,10 @@ impl DelayLine {
 
     pub fn set_samplerate(&mut self, samplerate: f64) {
         self.samplerate = samplerate;
+        // The internal delay buffer holds 2 s of samples at the
+        // construction rate; reallocate so the new rate's delays fit.
+        self.delay
+            .set_delay_buffer_samples((samplerate * 2.0) as usize);
         self.diffuser.set_samplerate(samplerate);
         self.low_pass.set_samplerate(samplerate);
         self.low_shelf.set_samplerate(samplerate);

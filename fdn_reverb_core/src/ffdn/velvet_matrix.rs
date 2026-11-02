@@ -40,13 +40,21 @@ pub struct VelvetMatrix {
     scratch: [f64; MAX_LINES],
     /// Cached `1 / BLOCK_SIZE`.
     inv_block: f64,
+    /// Size of the final partial block (`n % BLOCK_SIZE`); 0 when `n`
+    /// is a multiple of `BLOCK_SIZE`.
+    rem: usize,
+    /// Cached `1 / rem`.
+    inv_rem: f64,
 }
 
 impl VelvetMatrix {
     pub fn new(n: usize, seed: u64) -> Self {
-        // Round down to the nearest multiple of BLOCK_SIZE,
-        // never below BLOCK_SIZE and never above MAX_LINES.
-        let n = (n / BLOCK_SIZE * BLOCK_SIZE).clamp(BLOCK_SIZE, MAX_LINES);
+        // `n` may be any line count in [BLOCK_SIZE, MAX_LINES]. A final
+        // partial block (when `n` is not a multiple of `BLOCK_SIZE`)
+        // is handled inside `apply` as a smaller Householder
+        // reflection — still orthogonal, so the stability guarantee of
+        // the FDN is preserved for every line count.
+        let n = n.clamp(BLOCK_SIZE, MAX_LINES);
 
         let mut state = seed | 1;
         // --- Sign vectors -------------------------------------------
@@ -71,12 +79,16 @@ impl VelvetMatrix {
             perm.swap(i, j);
         }
 
+        let rem = n % BLOCK_SIZE;
         Self {
             n,
             signs,
             perm,
             scratch: [0.0; MAX_LINES],
             inv_block: 1.0 / BLOCK_SIZE as f64,
+            // Cached so `apply` avoids a division per sample.
+            inv_rem: if rem > 0 { 1.0 / rem as f64 } else { 0.0 },
+            rem,
         }
     }
 }
@@ -100,6 +112,21 @@ impl FeedbackMatrix for VelvetMatrix {
             }
             let scale = -2.0 * dot * self.inv_block;
             for k in 0..bs {
+                self.scratch[base + k] = x[base + k] + scale * self.signs[base + k];
+            }
+        }
+
+        // A final partial block gets its own (smaller) Householder
+        // reflection. Each block acts on a disjoint set of indices, so
+        // the block diagonal composition stays orthogonal for any `n`.
+        if self.rem > 0 {
+            let base = num_blocks * bs;
+            let mut dot = 0.0;
+            for k in 0..self.rem {
+                dot += self.signs[base + k] * x[base + k];
+            }
+            let scale = -2.0 * dot * self.inv_rem;
+            for k in 0..self.rem {
                 self.scratch[base + k] = x[base + k] + scale * self.signs[base + k];
             }
         }
@@ -153,6 +180,58 @@ mod tests {
                     expected
                 );
             }
+        }
+    }
+
+    /// The stability guarantee must hold for *every* line count,
+    /// including the ones with a final partial block (n not a multiple
+    /// of the 4-line block size).
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn velvet_is_orthogonal_for_every_line_count() {
+        for n in 4..=MAX_LINES {
+            let mut m = VelvetMatrix::new(n, 0xC0FFEE);
+            assert_eq!(m.size(), n, "matrix must not truncate to a multiple of 4");
+
+            let mut a = vec![vec![0.0; n]; n];
+            for col in 0..n {
+                let y = apply_matrix_to_basis(&mut m, col);
+                for row in 0..n {
+                    a[row][col] = y[row];
+                }
+            }
+            for i in 0..n {
+                for j in 0..n {
+                    let mut sum = 0.0;
+                    for k in 0..n {
+                        sum += a[k][i] * a[k][j];
+                    }
+                    let expected = if i == j { 1.0 } else { 0.0 };
+                    assert!(
+                        (sum - expected).abs() < 1e-12,
+                        "n = {n}: AᵀA[{i},{j}] = {} (expected {expected})",
+                        sum
+                    );
+                }
+            }
+        }
+    }
+
+    /// Regression: with a line count that is not a multiple of 4 the
+    /// matrix previously truncated to the largest multiple of 4, so
+    /// the trailing lines' feedback inputs were never written (they
+    /// kept stale values and effectively dropped out of the network).
+    #[test]
+    fn apply_writes_every_output_slot() {
+        for n in 5..=7 {
+            let mut m = VelvetMatrix::new(n, 0xC0FFEE);
+            let x: Vec<f64> = vec![1.0; n];
+            let mut y = vec![f64::NAN; n];
+            m.apply(&x, &mut y);
+            assert!(
+                y.iter().all(|v| v.is_finite()),
+                "n = {n}: apply left output slots unwritten"
+            );
         }
     }
 }

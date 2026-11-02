@@ -31,6 +31,34 @@ pub trait TextureLayer: Send {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
+/// Derives a unique per-construction RNG seed from a global instance
+/// counter, mixed through a splitmix64-style finalizer.
+///
+/// The granular layers (Crystal, Scatter, ILLUSION) seed an xorshift
+/// generator at construction. A fixed constant would make every
+/// instance of the plugin in the same process share the exact same
+/// random sequence; mixing in the counter decorrelates them while
+/// staying deterministic (the N-th constructed layer always gets the
+/// same sequence), allocation-free, and collision-free in practice.
+pub(crate) fn instance_seed(default_state: u64) -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static INSTANCE_COUNTER: AtomicU64 = AtomicU64::new(0);
+    let id = INSTANCE_COUNTER.fetch_add(1, Ordering::Relaxed);
+
+    let mut s = default_state ^ id.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    s ^= s >> 30;
+    s = s.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    s ^= s >> 27;
+    s = s.wrapping_mul(0x94D0_49BB_1331_11EB);
+    s ^= s >> 31;
+    // xorshift64 can never leave a zero state, so guarantee non-zero.
+    if s == 0 {
+        default_state | 1
+    } else {
+        s
+    }
+}
+
 /// The PEJVAK Texture Rack.
 pub struct TextureRack {
     layers: Vec<Box<dyn TextureLayer>>,

@@ -391,7 +391,6 @@ impl TextureLayer for Bloom {
 }
 
 impl Bloom {
-
     pub fn set_rise_norm(&mut self, v: f64) {
         self.rise_norm = v.clamp(0.0, 1.0);
         self.update_envelope_coeffs();

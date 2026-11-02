@@ -107,13 +107,42 @@ fn manual_dir() -> Option<PathBuf> {
 /// Opens `path` with the OS's default handler.
 #[cfg(target_os = "windows")]
 fn open_path(path: &std::path::Path) {
-    // `cmd /c start "" "<path>"` — the empty string after `start`
-    // is the "title" argument, which Windows otherwise treats the
-    // quoted path as. Omitting it causes `start` to interpret the
-    // path as a window title and open a blank cmd window instead.
-    let _ = std::process::Command::new("cmd")
-        .args(["/c", "start", "", &path.to_string_lossy()])
-        .spawn();
+    // Use ShellExecuteW directly instead of `cmd /c start`.
+    //
+    // The previous implementation called:
+    //     Command::new("cmd").args(["/c", "start", "", path_str])
+    //
+    // `cmd.exe` parses the entire command line for metacharacters
+    // (`&`, `|`, `^`, `>`, `<`, `%`, `!`) BEFORE `start` ever sees
+    // them. A path containing any of those — e.g., a Windows
+    // username with `&` in it, or a plugin installed under
+    // `C:\Program Files & Data\` — would be interpreted as a
+    // separate command and executed. This is a local command
+    // injection vulnerability.
+    //
+    // ShellExecuteW takes a wide (UTF-16) string directly and does
+    // NOT go through the shell, so no metacharacter interpretation
+    // can happen.
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            wide.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        );
+    }
 }
 
 #[cfg(target_os = "macos")]

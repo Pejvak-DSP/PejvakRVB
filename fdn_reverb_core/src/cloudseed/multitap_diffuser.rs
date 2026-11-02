@@ -35,6 +35,13 @@ pub struct MultitapDiffuser {
 
 impl MultitapDiffuser {
     pub fn new(delay_buffer_size: usize) -> Self {
+        // Defensive: a zero-length buffer would make the `sum - len`
+        // wrap in `process()` produce a wrong tap index and read out
+        // of bounds — the `unsafe` block assumes `len >= 1`. Every
+        // call site already passes a non-zero size, but a future
+        // caller that forgets would produce undefined behaviour.
+        let delay_buffer_size = delay_buffer_size.max(1);
+
         let mut m = Self {
             buffer: vec![0.0; delay_buffer_size],
             output: vec![0.0; delay_buffer_size],
@@ -87,6 +94,28 @@ impl MultitapDiffuser {
 
     pub fn get_output(&self) -> &[f64] {
         &self.output
+    }
+
+    /// Reallocates the delay/output buffers to `n` samples. Used when
+    /// the sample rate changes: the buffer is sized one second's worth
+    /// of samples at construction, so the new rate only fits after a
+    /// reallocation. Tap positions are recomputed against the new
+    /// length.
+    ///
+    /// # Real-time safety
+    ///
+    /// Not real-time safe (heap reallocation). Call this from a
+    /// control path, never from the audio thread.
+    pub fn set_buffer_samples(&mut self, n: usize) {
+        let n = n.max(1);
+        if n == self.len {
+            return;
+        }
+        self.buffer = vec![0.0; n];
+        self.output = vec![0.0; n];
+        self.len = n;
+        self.index = 0;
+        self.update();
     }
 
     pub fn process(&mut self, input: &[f64]) {
@@ -159,8 +188,16 @@ impl MultitapDiffuser {
         let scale_length = length / sum_lengths;
         self.tap_positions[0] = 0;
         for i in 1..count {
-            self.tap_positions[i] =
-                self.tap_positions[i - 1] + (self.tap_data[i] * scale_length) as usize;
+            self.tap_positions[i] = (self.tap_positions[i - 1]
+                + (self.tap_data[i] * scale_length) as usize)
+                // The tap read wraps with `sum - len`, which is only a
+                // valid single-subtract while the offset stays below
+                // `len`. For every legitimate configuration the longest
+                // tap is ~half the buffer, so this clamp is a no-op; it
+                // only guards a buffer that shrank relative to the tap
+                // length (e.g. after a sample-rate change without a
+                // reallocation).
+                .min(self.len.saturating_sub(1));
         }
 
         let last_tap_pos = self.tap_positions[count - 1];

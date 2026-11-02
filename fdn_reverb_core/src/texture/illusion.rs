@@ -35,7 +35,7 @@ const MAX_GRAINS: usize = 16;
 const MIN_GRAIN_MS: f64 = 30.0;
 const MAX_GRAIN_MS: f64 = 300.0;
 const MIN_RATE_HZ: f64 = 0.5;
-const MAX_RATE_HZ: f64 = 8.0;
+const MAX_RATE_HZ: f64 = 10.0;
 const WET_MAKEUP: f64 = 1.3;
 const MIN_TONE_HZ: f64 = 800.0;
 const MAX_TONE_HZ: f64 = 18_000.0;
@@ -45,6 +45,7 @@ const GRAIN_FADE_OUT_MS: f64 = 20.0;
 
 const DENORM: f64 = 1.0e-30;
 const BUF_ENTRY_LIMIT: f64 = 4.0;
+const ENTRANCE_SECS: f64 = 1.0;
 
 const SEQUENCE: [i32; 16] = [0, 7, 3, 12, 5, 15, 10, 19, 7, 3, 12, 5, 15, 7, 0, 0];
 
@@ -108,6 +109,14 @@ pub struct Illusion {
     /// crossfade from stepping when the enable switch toggles.
     spark_smoothed: f64,
     spark_smooth_coeff: f64,
+    /// One-shot entrance gain, in [0, 1]. Multiplied into the wet
+    /// output only. Advances linearly to 1.0 when a rising edge from
+    /// zero has been detected; otherwise stays at 1.0 (inactive).
+    entrance_gain: f64,
+    /// Per-sample step of the entrance ramp.
+    entrance_step: f64,
+    /// True while the entrance ramp is still climbing.
+    entrance_active: bool,
 
     // Parameters.
     spark: f64,
@@ -139,7 +148,10 @@ impl Illusion {
             grains: [Grain::INACTIVE; MAX_GRAINS],
             fb_l: 0.0,
             fb_r: 0.0,
-            rng_state: 0xC0FF_EE00_1234_5678,
+            // Seeded from a global instance counter (see
+            // `texture::instance_seed`) so two instances of the plugin
+            // in the same process never share the same grain sequence.
+            rng_state: crate::texture::instance_seed(0xC0FF_EE00_1234_5678),
             dc_x_l: 0.0,
             dc_y_l: 0.0,
             dc_x_r: 0.0,
@@ -155,6 +167,9 @@ impl Illusion {
             // discontinuity, fast enough that the effect still feels
             // instantaneous.
             spark_smooth_coeff: 1.0 - (-1.0 / (0.020 * samplerate)).exp(),
+            entrance_gain: 1.0,
+            entrance_step: 1.0 / (samplerate * ENTRANCE_SECS),
+            entrance_active: false,
             spark: 0.0,
             still: 0.5,
             aura_semis: 0.0,
@@ -347,6 +362,18 @@ impl Illusion {
             let dry_gain = (1.0 - s).sqrt();
             let wet_gain = s.sqrt() * WET_MAKEUP;
 
+            // One-shot entrance ramp. Advances once per sample while
+            // active, then locks at 1.0 so the steady-state path is
+            // untouched (no branch, no extra math once `entrance_active`
+            // has cleared).
+            if self.entrance_active {
+                self.entrance_gain = (self.entrance_gain + self.entrance_step).min(1.0);
+                if self.entrance_gain >= 1.0 {
+                    self.entrance_active = false;
+                }
+            }
+            let entrance = self.entrance_gain;
+
             let in_l = left[i];
             let in_r = right[i];
 
@@ -437,8 +464,8 @@ impl Illusion {
             }
 
             // ---- Output blend ------------------------------------------
-            left[i] = in_l * dry_gain + out_l * wet_gain;
-            right[i] = in_r * dry_gain + out_r * wet_gain;
+            left[i] = in_l * dry_gain + out_l * wet_gain * entrance;
+            right[i] = in_r * dry_gain + out_r * wet_gain * entrance;
         }
     }
 
@@ -464,7 +491,6 @@ impl Illusion {
         }
     }
 
-
     pub fn set_samplerate(&mut self, sr: f64) {
         if (sr - self.samplerate).abs() < 1.0 {
             return;
@@ -485,6 +511,9 @@ impl Illusion {
         }
         self.update_rate();
         self.update_tone();
+
+        self.spark_smooth_coeff = 1.0 - (-1.0 / (0.020 * sr)).exp();
+        self.entrance_step = 1.0 / (sr * ENTRANCE_SECS);
     }
 
     // ---- Parameter setters ----------------------------------------------
@@ -497,16 +526,13 @@ impl Illusion {
     pub fn set_spark(&mut self, v: f64) {
         let old = self.spark;
         self.spark = v.clamp(0.0, 1.0);
-        // Rising edge: `old` was exactly 0 (disabled) and now we're
-        // active. Perform a full reset including the capture buffer.
-        // The buffer holds the last 2 seconds of audio captured
-        // before the layer was bypassed; if TX was engaged for a
-        // while, that content is stale and would produce a click
-        // when the read head starts playing it back. Clearing the
-        // buffer makes the layer start from silence, which — with
-        // the 20 ms crossfade ramp — is completely click-free.
         if old <= 0.0 && self.spark > 0.0 {
             self.clear_buffers();
+            // Start a one-shot fade-in. Only the rising edge from
+            // exactly 0 triggers it; turning the knob further once
+            // the effect is already audible is unaffected.
+            self.entrance_gain = 0.0;
+            self.entrance_active = true;
         }
     }
     #[inline]

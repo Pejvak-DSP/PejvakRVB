@@ -145,6 +145,7 @@ enum HistoryAction {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ModalPanel {
     About,
+    Update,
 }
 
 // ============================================================================
@@ -1254,20 +1255,56 @@ fn denormalize(index: usize, physical: f32) -> f32 {
         return if physical >= 0.5 { 1.0 } else { 0.0 };
     }
     use fdn_reverb_core::cloudseed::scaled_parameter_value;
-    let physical = physical as f64;
+    let target = physical as f64;
     let mut lo = 0.0f64;
     let mut hi = 1.0f64;
     let increasing = scaled_parameter_value(index, 1.0) >= scaled_parameter_value(index, 0.0);
     for _ in 0..60 {
         let mid = 0.5 * (lo + hi);
         let v = scaled_parameter_value(index, mid);
-        if (v < physical) == increasing {
+        if (v < target) == increasing {
             lo = mid;
         } else {
             hi = mid;
         }
     }
-    (0.5 * (lo + hi)) as f32
+
+    let p_center = (0.5 * (lo + hi)) as f32;
+    let v_center = scaled_parameter_value(index, p_center as f64);
+    if v_center == target {
+        return p_center;
+    }
+
+    let need_up = (v_center < target) == increasing;
+    let first_sign: i64 = if need_up { 1 } else { -1 };
+
+    let mut best = p_center;
+    let mut best_dist = (v_center - target).abs();
+
+    for sign in [first_sign, -first_sign] {
+        let mut bits = p_center.to_bits() as i64;
+        for _ in 0..64 {
+            bits += sign;
+            if bits < 0 || bits > 1.0f32.to_bits() as i64 {
+                break;
+            }
+            let p = f32::from_bits(bits as u32);
+            if !(0.0..=1.0).contains(&p) {
+                break;
+            }
+            let v = scaled_parameter_value(index, p as f64);
+            if v == target {
+                return p;
+            }
+            let d = (v - target).abs();
+            if d < best_dist {
+                best = p;
+                best_dist = d;
+            }
+        }
+    }
+
+    best
 }
 
 fn is_switch(index: usize) -> bool {
@@ -1703,6 +1740,8 @@ pub fn create_editor(params: Arc<PejvakRvbParams>) -> Option<EguiEditor<PejvakEg
         suppress_until: 0.0,
         was_focused: None,
         last_history_apply: 0.0,
+        update_phase: Arc::new(Mutex::new(crate::updater::UpdatePhase::Idle)),
+        update_busy: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
 
     let mut settings = EguiNiceSettings::default();
@@ -2359,10 +2398,8 @@ fn texture_kill_button(
 
     // Publish the derived state for the card switches below.
     ui.memory_mut(|m| {
-        m.data.insert_temp(
-            egui::Id::new("pejvak_tx_kill_active"),
-            kill_active,
-        );
+        m.data
+            .insert_temp(egui::Id::new("pejvak_tx_kill_active"), kill_active);
     });
 
     // ---- Pending-commit guard ---------------------------------------
@@ -2406,10 +2443,8 @@ fn texture_kill_button(
         // the memory lock, so the two egui locks (input and memory)
         // are never held simultaneously.
         ui.memory_mut(|m| {
-            m.data.insert_temp(
-                egui::Id::new("pejvak_force_undo_commit_at"),
-                now + 0.10,
-            );
+            m.data
+                .insert_temp(egui::Id::new("pejvak_force_undo_commit_at"), now + 0.10);
         });
     }
 
@@ -2419,7 +2454,6 @@ fn texture_kill_button(
         let painter = ui.painter();
 
         if kill_active {
-
             painter.rect_filled(rect, 6.0 * scale, KILL_RED.gamma_multiply(0.10));
 
             let inner_rect = rect.shrink(3.0 * scale);
@@ -2575,7 +2609,13 @@ fn menu_button(ui: &mut Ui, t: &Theme, scale: f32, p: &Arc<PejvakRvbParams>) {
     let popup_w = 220.0 * scale;
     let row_h = 26.0 * scale;
     let pad = 6.0 * scale;
-    let items = ["Manual", "Size", "About", "Show pop-ups"];
+    let items = [
+        "Manual",
+        "Size",
+        "About",
+        "Check for updates",
+        "Show pop-ups",
+    ];
     let popup_h = row_h * items.len() as f32 + pad * 2.0;
 
     let popup_pos = Pos2::new((rect.right() - popup_w).max(4.0), rect.bottom() + 4.0);
@@ -2646,7 +2686,7 @@ fn menu_button(ui: &mut Ui, t: &Theme, scale: f32, p: &Arc<PejvakRvbParams>) {
                         Sense::click(),
                     );
                     let is_size_row = i == 1;
-                    let is_toggle_row = i == 3;
+                    let is_toggle_row = i == 4;
 
                     if is_size_row {
                         if r_resp.hovered() {
@@ -2835,17 +2875,25 @@ fn menu_button(ui: &mut Ui, t: &Theme, scale: f32, p: &Arc<PejvakRvbParams>) {
         let now = ui.input(|i| i.time);
         match idx {
             0 => {
-                // Manual opens the bundled HTML file in the user's
-                // default browser instead of showing a modal. The
-                // browser gives a much richer reading experience
-                // (search, TOC, dark/light themes, print-to-PDF) and
-                // costs nothing at runtime — the HTML is embedded in
-                // the binary and simply written to disk on first use.
                 crate::manual::open_in_browser();
             }
             2 => {
                 ui.memory_mut(|m| {
                     m.data.insert_temp(modal_id, ModalPanel::About);
+                    m.data.insert_temp(modal_id.with("opened_at"), now);
+                    m.data.remove::<f64>(modal_id.with("closing_at"));
+                });
+            }
+            3 => {
+                // Check for updates — request a check by writing a
+                // one-shot flag into egui memory. The actual work
+                // happens in `ui()` where `self` is available.
+                ui.memory_mut(|m| {
+                    m.data
+                        .insert_temp(egui::Id::new("pejvak_check_updates_requested"), true);
+                });
+                ui.memory_mut(|m| {
+                    m.data.insert_temp(modal_id, ModalPanel::Update);
                     m.data.insert_temp(modal_id.with("opened_at"), now);
                     m.data.remove::<f64>(modal_id.with("closing_at"));
                 });
@@ -2915,6 +2963,10 @@ pub struct PejvakEguiApp {
     suppress_until: f64,
     was_focused: Option<bool>,
     last_history_apply: f64,
+    /// Update state, shared with the background check/download thread.
+    update_phase: Arc<Mutex<crate::updater::UpdatePhase>>,
+    /// Prevents overlapping check/download requests.
+    update_busy: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl NiceEguiApp for PejvakEguiApp {
@@ -2953,7 +3005,54 @@ impl NiceEguiApp for PejvakEguiApp {
             None => return,
         };
         let setter = gui_ctx.param_setter();
-    
+
+        // ---- Update check trigger ----------------------------------
+        // Read → clear → act. `IdTypeMap::remove` returns `()` in
+        // egui 0.36, so we peek with `get_temp` first and then remove
+        // the flag in a separate `memory_mut` call.
+        let want_update_check = ui
+            .memory(|m| {
+                m.data
+                    .get_temp::<bool>(egui::Id::new("pejvak_check_updates_requested"))
+            })
+            .unwrap_or(false);
+        if want_update_check {
+            ui.memory_mut(|m| {
+                m.data
+                    .remove::<bool>(egui::Id::new("pejvak_check_updates_requested"));
+            });
+            self.start_update_check(ui.ctx().clone());
+        }
+
+        let want_download = ui.memory(|m| {
+            m.data
+                .get_temp::<(String, String, String, Option<String>)>(egui::Id::new(
+                    "pejvak_update_download_request",
+                ))
+        });
+        if let Some((version, url, name, digest)) = want_download {
+            ui.memory_mut(|m| {
+                m.data
+                    .remove::<(String, String, String, Option<String>)>(egui::Id::new(
+                        "pejvak_update_download_request",
+                    ));
+            });
+            self.start_update_download(ui.ctx().clone(), version, url, name, digest);
+        }
+
+        // Host-driven disable state. The DAW calls `deactivate()` on
+        // the audio side, which clears this flag; we poll it here on
+        // the GUI thread.
+        let plugin_active = self
+            .params
+            .plugin_active
+            .load(std::sync::atomic::Ordering::Relaxed);
+
+        // Poll for host state changes even when the plugin is active.
+        let poll_ms = if plugin_active { 100 } else { 33 };
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(poll_ms));
+
         // Pull the persisted preset name if the host restored it
         // (e.g. project load). Cheap no-op when nothing changed.
         if let Ok(p) = self.params.current_preset.try_lock() {
@@ -3057,7 +3156,7 @@ impl NiceEguiApp for PejvakEguiApp {
         self.text_edit_active = Self::read_text_edit_active(ui);
 
         self.poll_preset_dialog(&setter);
-        
+
         // Scan the user-preset directory at most every 0.5 s.
         //
         // Previously this ran on every frame, issuing a `read_dir` plus
@@ -3192,6 +3291,8 @@ impl NiceEguiApp for PejvakEguiApp {
             .unwrap_or_default();
 
         let mut pending_action: Option<HistoryAction> = None;
+        let update_phase = self.update_phase.clone();
+        let update_busy = self.update_busy.clone();
 
         show_resizable_delta(
             ui,
@@ -3253,10 +3354,15 @@ impl NiceEguiApp for PejvakEguiApp {
                 // Draw the modal panel inside this closure so that
                 // `ui.max_rect()` is the true plugin area, not a
                 // shrunk rect left over from a previous layout pass.
-                draw_modal_panel(ui, &theme, scale);
+                draw_modal_panel(ui, &theme, scale, &update_phase, &update_busy);
+
+                // Draw the disabled overlay LAST so it sits on top
+                // of every other widget and captures all input.
+                if !plugin_active {
+                    draw_plugin_disabled_overlay(ui, &theme, scale);
+                }
             },
         );
-
 
         // ============================================================
         // Force-commit check — reads a flag set on the PREVIOUS frame
@@ -3279,11 +3385,8 @@ impl NiceEguiApp for PejvakEguiApp {
                 if now >= commit_at {
                     ui.memory_mut(|m| m.data.remove::<f64>(force_id));
 
-                    let current = capture_undo_snapshot(
-                        &self.params,
-                        &current_preset,
-                        self.current_page,
-                    );
+                    let current =
+                        capture_undo_snapshot(&self.params, &current_preset, self.current_page);
                     if let Some(prev) = self.last_snapshot.take() {
                         if snapshots_differ(&prev, &current, 1.0e-4) {
                             self.undo_stack.push_back(prev);
@@ -3409,7 +3512,7 @@ impl PejvakEguiApp {
     fn poll_preset_dialog(&mut self, setter: &ParamSetter) {
         let mut st = pd_lock();
         let mut touched_disk = false;
-    
+
         if let Some(path) = st.save_path.take() {
             let _ = std::fs::write(&path, params_to_xml(&self.params));
             if let Some(stem) = path.file_stem().and_then(|x| x.to_str()) {
@@ -3417,7 +3520,7 @@ impl PejvakEguiApp {
             }
             touched_disk = true;
         }
-    
+
         if let Some(path) = st.load_path.take() {
             if let Some(parsed) = xml_to_params(&path) {
                 apply_cloudseed_partial(&self.params, setter, &parsed.cloudseed);
@@ -3442,7 +3545,7 @@ impl PejvakEguiApp {
             }
             touched_disk = true;
         }
-    
+
         // Runs for BOTH save and load — moved out of the load block.
         if touched_disk {
             self.user_presets_last_refresh = f64::NEG_INFINITY;
@@ -3491,6 +3594,88 @@ impl PejvakEguiApp {
         self.last_history_apply = now;
 
         Some((target_name, target_page))
+    }
+
+    fn start_update_check(&self, ctx: egui::Context) {
+        use std::sync::atomic::Ordering;
+        if self.update_busy.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let phase = self.update_phase.clone();
+        let busy = self.update_busy.clone();
+        if let Ok(mut p) = phase.lock() {
+            *p = crate::updater::UpdatePhase::Checking;
+        }
+        ctx.request_repaint();
+
+        std::thread::spawn(move || {
+            // `catch_unwind` guarantees `busy` is always cleared,
+            // even if `check_now` panics on a malformed HTTP
+            // response or a hostile server. Without this, a single
+            // panic would leave `update_busy = true` forever and
+            // permanently disable the updater until the plugin is
+            // reloaded.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::updater::check_now()
+            }))
+            .unwrap_or_else(|_| {
+                crate::updater::UpdatePhase::Error(
+                    "Update check crashed unexpectedly. Please try again.".to_string(),
+                )
+            });
+
+            if let Ok(mut p) = phase.lock() {
+                *p = result;
+            }
+            busy.store(false, Ordering::SeqCst);
+            ctx.request_repaint();
+        });
+    }
+
+    fn start_update_download(
+        &self,
+        ctx: egui::Context,
+        version: String,
+        url: String,
+        name: String,
+        digest: Option<String>,
+    ) {
+        use std::sync::atomic::Ordering;
+        if self.update_busy.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let phase = self.update_phase.clone();
+        let busy = self.update_busy.clone();
+        if let Ok(mut p) = phase.lock() {
+            *p = crate::updater::UpdatePhase::Downloading {
+                version: version.clone(),
+            };
+        }
+        ctx.request_repaint();
+
+        std::thread::spawn(move || {
+            // Same rationale as `start_update_check`: a panic in
+            // `download_installer` (malformed HTTP chunk, hostile
+            // server, disk error surfaced as a panic) must not
+            // leave `update_busy` latched.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::updater::download_installer(&url, &name, digest.as_deref())
+            }))
+            .unwrap_or_else(|_| {
+                Err("Download crashed unexpectedly. Please try again.".to_string())
+            });
+
+            let phase_result = match result {
+                Ok(path) => crate::updater::UpdatePhase::Downloaded { version, path },
+                Err(e) => crate::updater::UpdatePhase::Error(e),
+            };
+
+            if let Ok(mut p) = phase.lock() {
+                *p = phase_result;
+            }
+            busy.store(false, Ordering::SeqCst);
+            ctx.request_repaint();
+        });
     }
 
     /// Returns `true` if any TextEdit is currently in edit mode.
@@ -4055,6 +4240,37 @@ fn header_toggle_group<P: Param>(
         let seg_rect = seg_rects[i];
         let on = on_state[i];
 
+        // ---- Bypass pulse ---------------------------------------------
+        // When bypass is engaged the button "breathes" at 1.5 Hz so
+        // the state is unmistakable at a glance. Soft modulation
+        // rather than a hard on/off blink — the latter is distracting
+        // over long sessions, while a breathing pulse reads clearly
+        // as "active" without pulling the eye off the knobs.
+        //
+        // Only the Bypass button pulses. Freeze and Interp keep the
+        // static filled background they have always had, so no
+        // existing behaviour changes.
+        let is_bypass_on = *label == "Bypass" && on;
+        let (pulse_bg, pulse_text) = if is_bypass_on {
+            let t_now = ui.ctx().input(|i| i.time) as f32;
+            // sin wave in [0, 1] at 1.5 Hz (one breath every ~667 ms)
+            let wave = (t_now * std::f32::consts::TAU * 1.5).sin() * 0.5 + 0.5;
+            // Background alpha: 0.35× .. 1.65× of the normal filled
+            // value — a ~4.7× ratio, clearly visible in both themes.
+            // Text luminance: 50 % .. 100 % of the accent colour.
+            (0.35 + wave * 1.30, 0.50 + wave * 0.50)
+        } else {
+            (1.0, 1.0)
+        };
+
+        if is_bypass_on {
+            // Keep the pulse animating across frames. Only requested
+            // when bypass is actually on, so idle CPU cost is
+            // unchanged (egui throttles repaints while the window is
+            // hidden or unfocused).
+            ui.ctx().request_repaint();
+        }
+
         let text_accent = if is_light {
             accent.gamma_multiply(0.70)
         } else {
@@ -4068,10 +4284,11 @@ fn header_toggle_group<P: Param>(
         );
 
         if anim > 0.01 {
-            painter.rect_filled(seg_rect, inner_radius, accent.gamma_multiply(bg_mul * anim));
+            let bg = accent.gamma_multiply((bg_mul * anim * pulse_bg).min(1.0));
+            painter.rect_filled(seg_rect, inner_radius, bg);
         }
 
-        let text_col = lerp_color(t.dim, text_accent, anim);
+        let text_col = lerp_color(t.dim, text_accent, (anim * pulse_text).min(1.0));
         painter.text(
             seg_rect.center(),
             egui::Align2::CENTER_CENTER,
@@ -4953,8 +5170,7 @@ fn draw_main_page_ffdn(
             // function so FILTER, MIXER, and DYNAMICS all end at the
             // same y-coordinate.
             let filter_on = p.ffdn.filter_enabled.value();
-            let remaining_px =
-                (ui.available_height() - gap_y - BOTTOM_OFFSET * scale).max(60.0);
+            let remaining_px = (ui.available_height() - gap_y - BOTTOM_OFFSET * scale).max(60.0);
             let filter_h = ((remaining_px - 2.0 * pad_px) / scale).max(80.0);
             draw_card_h(
                 ui,
@@ -5182,8 +5398,7 @@ fn draw_main_page_ffdn(
             // ============ MIXER ============
             // Same bottom offset as FILTER and DYNAMICS so the three
             // cards' bottom edges line up.
-            let remaining_px =
-                (ui.available_height() - gap_y - BOTTOM_OFFSET * scale).max(60.0);
+            let remaining_px = (ui.available_height() - gap_y - BOTTOM_OFFSET * scale).max(60.0);
             let mixer_min_h = ((remaining_px - 2.0 * pad_px) / scale).max(80.0);
             draw_card_h(ui, t, scale, true, "mixer", mixer_min_h, |ui, ct| {
                 section_title(ui, ct, "MIXER", ct.output, scale);
@@ -5364,8 +5579,7 @@ fn draw_main_page_ffdn(
             // Fills the same vertical span as FILTER and MIXER, so the
             // three bottom cards share one bottom edge.
             let dynamics_on = p.ffdn.dynamics_enabled.value();
-            let remaining_px =
-                (ui.available_height() - gap_y - BOTTOM_OFFSET * scale).max(60.0);
+            let remaining_px = (ui.available_height() - gap_y - BOTTOM_OFFSET * scale).max(60.0);
             let dynamics_h = ((remaining_px - 2.0 * pad_px) / scale).max(80.0);
             draw_card_h(
                 ui,
@@ -5390,8 +5604,7 @@ fn draw_main_page_ffdn(
                         // taller than the 3-knob content, push the row
                         // down so the visual weight stays balanced.
                         let used = KNOB_SLOT_H * scale + 6.0 * scale;
-                        let target =
-                            dynamics_h * scale - CARD_TITLE_H * scale - 12.0 * scale;
+                        let target = dynamics_h * scale - CARD_TITLE_H * scale - 12.0 * scale;
                         if target > used {
                             ui.add_space((target - used) * 0.5);
                         }
@@ -5962,7 +6175,13 @@ fn draw_texture_order_card(ui: &mut Ui, p: &Arc<PejvakRvbParams>, t: &Theme, sca
     }
 }
 
-fn draw_illusion_card(ui: &mut Ui, p: &Arc<PejvakRvbParams>, s: &ParamSetter, t: &Theme, scale: f32) {
+fn draw_illusion_card(
+    ui: &mut Ui,
+    p: &Arc<PejvakRvbParams>,
+    s: &ParamSetter,
+    t: &Theme,
+    scale: f32,
+) {
     let illusion_on = p.illusion.enabled.value();
 
     // Animate the accent colour so it greys out with the rest of the
@@ -5975,7 +6194,15 @@ fn draw_illusion_card(ui: &mut Ui, p: &Arc<PejvakRvbParams>, s: &ParamSetter, t:
     let accent = lerp_color(accent_grey, t.tex_illusion, accent_anim);
 
     draw_card_h(ui, t, scale, illusion_on, "illusion", 80.0, |ui, ct| {
-        section_title_with_enabled_switch(ui, ct, "ILLUSION", accent, &p.illusion.enabled, s, scale);
+        section_title_with_enabled_switch(
+            ui,
+            ct,
+            "ILLUSION",
+            accent,
+            &p.illusion.enabled,
+            s,
+            scale,
+        );
         ui.add_enabled_ui(illusion_on, |ui| {
             // All eight ILLUSION knobs in a single row:
             //   Spark, Still, Aura, Veil, Wide, Tint, Rate, Grain.
@@ -6024,7 +6251,7 @@ fn draw_illusion_card(ui: &mut Ui, p: &Arc<PejvakRvbParams>, s: &ParamSetter, t:
                 );
                 knob_compact(
                     ui, ct, "Rate", &p.illusion.rate, s,
-                    "Clock speed.\n0.5 Hz = very slow (one note every 2 s).\n8 Hz = fast arpeggio.",
+                    "Clock speed.\n0.5 Hz = very slow (one note every 2 s).\n10 Hz = fast arpeggio.",
                     accent, scale,
                 );
                 knob_compact(
@@ -6822,11 +7049,7 @@ fn category_header(
 /// Unlike undo/redo, loading a preset **does** reset the DSP core so
 /// the new reverb tail starts from silence rather than bleeding in
 /// from the previous preset.
-fn apply_cloudseed_partial(
-    p: &Arc<PejvakRvbParams>,
-    s: &ParamSetter,
-    values: &[Option<f32>; 49],
-) {
+fn apply_cloudseed_partial(p: &Arc<PejvakRvbParams>, s: &ParamSetter, values: &[Option<f32>; 49]) {
     p.reset_requested
         .store(true, std::sync::atomic::Ordering::Relaxed);
 
@@ -9015,6 +9238,65 @@ fn rounded_gradient(rect: Rect, radius: f32, top: Color32, bottom: Color32) -> e
     egui::Shape::mesh(mesh)
 }
 
+/// Full-window overlay shown while the host has the plugin in its
+/// deactivated / disabled state.
+///
+/// The overlay covers the entire plugin area, dims the underlying
+/// UI to make it clear that parameter edits won't take effect, and
+/// **captures every click** so the user cannot interact with the
+/// (inactive) widgets underneath.
+///
+/// The overlay is drawn as a real `Foreground` area rather than a
+/// raw painter call because we also need to allocate an interactive
+/// rect that blocks input. A painter-only overlay would dim the UI
+/// visually but leave the knobs and buttons clickable.
+fn draw_plugin_disabled_overlay(ui: &mut Ui, t: &Theme, scale: f32) {
+    let screen = ui.max_rect();
+    let is_light = t.bg_top.r() > 128;
+
+    egui::Area::new(egui::Id::new("pejvak_plugin_disabled_overlay"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(screen.min)
+        .interactable(true)
+        .movable(false)
+        .show(ui.ctx(), |ui| {
+            ui.set_min_size(screen.size());
+            ui.set_max_size(screen.size());
+
+            // Allocate the full screen as a click target. Every
+            // subsequent click in this frame goes to this rect and
+            // never reaches the plugin's real widgets.
+            let (rect, _) = ui.allocate_exact_size(screen.size(), Sense::click());
+
+            let painter = ui.painter();
+
+            // Heavy dim — enough to read the UI underneath but
+            // unambiguous that it is inactive. Light mode uses a
+            // slightly lower alpha because the base palette is
+            // already bright.
+            let backdrop_alpha: u8 = if is_light { 175 } else { 200 };
+            painter.rect_filled(rect, 0.0, Color32::from_black_alpha(backdrop_alpha));
+
+            // Red accent matches the TX kill switch and the
+            // Bypass-pulse colour, so the "off" state reads as part
+            // of the same visual language.
+            painter.text(
+                rect.center() + egui::vec2(0.0, -10.0 * scale),
+                egui::Align2::CENTER_CENTER,
+                "PLUGIN DISABLED",
+                egui::FontId::proportional(26.0 * scale),
+                KILL_RED,
+            );
+            painter.text(
+                rect.center() + egui::vec2(0.0, 26.0 * scale),
+                egui::Align2::CENTER_CENTER,
+                "Enable the plugin in your DAW to resume editing.",
+                egui::FontId::proportional(12.0 * scale),
+                Color32::from_rgb(0xE6, 0xEA, 0xF4),
+            );
+        });
+}
+
 /// Draws the modal panel (Manual / About) centred in the plugin
 /// window. The modal is drawn as a floating window with a dimmed
 /// backdrop. Clicking outside the modal closes it.
@@ -9025,7 +9307,13 @@ fn rounded_gradient(rect: Rect, radius: f32, top: Color32, bottom: Color32) -> e
 /// Only when the fade reaches zero does the modal get removed from
 /// memory. This gives a symmetric open/close feel and avoids the
 /// "pop" of an instant dismissal.
-fn draw_modal_panel(ui: &mut Ui, t: &Theme, scale: f32) {
+fn draw_modal_panel(
+    ui: &mut Ui,
+    t: &Theme,
+    scale: f32,
+    update_phase: &Arc<Mutex<crate::updater::UpdatePhase>>,
+    update_busy: &Arc<std::sync::atomic::AtomicBool>,
+) {
     let modal_id = egui::Id::new("pejvak_modal_panel");
     let opened_at_id = modal_id.with("opened_at");
     let closing_at_id = modal_id.with("closing_at");
@@ -9135,6 +9423,7 @@ fn draw_modal_panel(ui: &mut Ui, t: &Theme, scale: f32) {
                 ui.horizontal(|ui| {
                     let title = match panel {
                         ModalPanel::About => "About",
+                        ModalPanel::Update => "Check for updates",
                     };
                     ui.label(
                         egui::RichText::new(title)
@@ -9172,6 +9461,9 @@ fn draw_modal_panel(ui: &mut Ui, t: &Theme, scale: f32) {
                     .auto_shrink([false, false])
                     .show(ui, |ui| match panel {
                         ModalPanel::About => draw_about_body(ui, t, body_col, scale),
+                        ModalPanel::Update => {
+                            draw_update_body(ui, t, body_col, scale, update_phase, update_busy)
+                        }
                     });
             });
         });
@@ -9199,7 +9491,6 @@ fn draw_modal_panel(ui: &mut Ui, t: &Theme, scale: f32) {
     }
 }
 
-
 /// Body of the About modal.
 fn draw_about_body(ui: &mut Ui, t: &Theme, body_col: Color32, scale: f32) {
     // ---- Logo ----
@@ -9209,32 +9500,27 @@ fn draw_about_body(ui: &mut Ui, t: &Theme, body_col: Color32, scale: f32) {
     // re-decoding the image. The `image` crate is only pulled in for
     // the `png` feature, so decoding is a few hundred microseconds.
     let logo_id = egui::Id::new("pejvak_logo_texture");
-    let logo_texture: Option<egui::TextureHandle> =
-        ui.ctx().data(|d| d.get_temp(logo_id));
+    let logo_texture: Option<egui::TextureHandle> = ui.ctx().data(|d| d.get_temp(logo_id));
     let logo_texture = match logo_texture {
         Some(tex) => Some(tex),
-        None => {
-            match image::load_from_memory(LOGO_PNG) {
-                Ok(img) => {
-                    let rgba = img.to_rgba8();
-                    let (w, h) = rgba.dimensions();
-                    let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                        [w as usize, h as usize],
-                        rgba.as_raw(),
-                    );
-                    let tex = ui.ctx().load_texture(
-                        "pejvak-logo",
-                        color_image,
-                        egui::TextureOptions::LINEAR,
-                    );
-                    ui.ctx().data_mut(|d| {
-                        d.insert_temp(logo_id, tex.clone());
-                    });
-                    Some(tex)
-                }
-                Err(_) => None,
+        None => match image::load_from_memory(LOGO_PNG) {
+            Ok(img) => {
+                let rgba = img.to_rgba8();
+                let (w, h) = rgba.dimensions();
+                let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                    [w as usize, h as usize],
+                    rgba.as_raw(),
+                );
+                let tex =
+                    ui.ctx()
+                        .load_texture("pejvak-logo", color_image, egui::TextureOptions::LINEAR);
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(logo_id, tex.clone());
+                });
+                Some(tex)
             }
-        }
+            Err(_) => None,
+        },
     };
 
     if let Some(tex) = logo_texture {
@@ -9338,7 +9624,7 @@ fn draw_about_body(ui: &mut Ui, t: &Theme, body_col: Color32, scale: f32) {
     ui.add_space(12.0 * scale);
     ui.vertical_centered(|ui| {
         let _ = ui.label(
-           egui::RichText::new("Pejvak DSP")
+            egui::RichText::new("Pejvak DSP")
                 .size(11.0 * scale)
                 .strong()
                 .color(t.accent),
@@ -9368,4 +9654,239 @@ fn draw_about_body(ui: &mut Ui, t: &Theme, body_col: Color32, scale: f32) {
                 .color(t.dim2),
         );
     });
+}
+
+/// Body of the "Check for updates" modal.
+fn draw_update_body(
+    ui: &mut Ui,
+    t: &Theme,
+    body_col: Color32,
+    scale: f32,
+    update_phase: &Arc<Mutex<crate::updater::UpdatePhase>>,
+    update_busy: &Arc<std::sync::atomic::AtomicBool>,
+) {
+    use crate::updater::UpdatePhase;
+
+    let phase = update_phase
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or(UpdatePhase::Idle);
+    let busy = update_busy.load(std::sync::atomic::Ordering::Relaxed);
+
+    ui.vertical_centered(|ui| {
+        let _ = ui.label(
+            egui::RichText::new("PEJVAK   RVB")
+                .font(egui::FontId::new(
+                    14.0 * scale,
+                    egui::FontFamily::Name("Monoton".into()),
+                ))
+                .color(t.accent),
+        );
+        ui.add_space(2.0 * scale);
+        let _ = ui.label(
+            egui::RichText::new(format!("Current version: v{}", env!("CARGO_PKG_VERSION")))
+                .size(10.0 * scale)
+                .color(t.dim2),
+        );
+    });
+    ui.add_space(12.0 * scale);
+
+    match phase {
+        UpdatePhase::Idle => {
+            let _ = ui.label(
+                egui::RichText::new("Press the button below to check for a new version.")
+                    .size(11.0 * scale)
+                    .color(body_col),
+            );
+            ui.add_space(10.0 * scale);
+            if ui
+                .add(egui::Button::new(
+                    egui::RichText::new("Check now").size(11.0 * scale),
+                ))
+                .clicked()
+                && !busy
+            {
+                // We cannot spawn from here (no Context), so signal
+                // through the same one-shot flag the menu uses.
+                ui.memory_mut(|m| {
+                    m.data
+                        .insert_temp(egui::Id::new("pejvak_check_updates_requested"), true);
+                });
+            }
+        }
+        UpdatePhase::Checking => {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(
+                    egui::RichText::new("Checking for updates…")
+                        .size(11.0 * scale)
+                        .color(body_col),
+                );
+            });
+        }
+        UpdatePhase::UpToDate => {
+            let _ = ui.label(
+                egui::RichText::new("You are running the latest version.")
+                    .size(12.0 * scale)
+                    .color(t.accent),
+            );
+        }
+        UpdatePhase::Available {
+            version,
+            notes,
+            download_url,
+            asset_name,
+            digest,
+        } => {
+            let _ = ui.label(
+                egui::RichText::new(format!("Version v{version} is available"))
+                    .size(12.0 * scale)
+                    .strong()
+                    .color(t.accent),
+            );
+            ui.add_space(6.0 * scale);
+            if !notes.is_empty() {
+                let _ = ui.label(
+                    egui::RichText::new("Release notes:")
+                        .size(9.5 * scale)
+                        .strong()
+                        .color(t.dim2),
+                );
+                let _ = ui.label(
+                    egui::RichText::new(notes)
+                        .size(10.0 * scale)
+                        .color(body_col),
+                );
+                ui.add_space(6.0 * scale);
+            }
+
+            ui.horizontal(|ui| {
+                match (download_url, asset_name) {
+                    (Some(url), Some(name)) => {
+                        if ui
+                            .add(egui::Button::new(
+                                egui::RichText::new("Download & Install").size(11.0 * scale),
+                            ))
+                            .clicked()
+                            && !busy
+                        {
+                            ui.memory_mut(|m| {
+                                m.data.insert_temp(
+                                    egui::Id::new("pejvak_update_download_request"),
+                                    (version.clone(), url.clone(), name.clone(), digest.clone()),
+                                );
+                            });
+                        }
+                    }
+                    _ => {
+                        let _ = ui.label(
+                            egui::RichText::new(
+                                "No installer found for this platform — \
+                                 use the releases page.",
+                            )
+                            .size(10.0 * scale)
+                            .color(t.dim2),
+                        );
+                    }
+                }
+                if ui
+                    .add(egui::Button::new(
+                        egui::RichText::new("Open Releases Page").size(11.0 * scale),
+                    ))
+                    .clicked()
+                {
+                    crate::updater::open_releases_page();
+                }
+            });
+        }
+        UpdatePhase::Downloading { version } => {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(
+                    egui::RichText::new(format!("Downloading v{version}…"))
+                        .size(11.0 * scale)
+                        .color(body_col),
+                );
+            });
+        }
+        UpdatePhase::Downloaded { version, path } => {
+            let _ = ui.label(
+                egui::RichText::new(format!("v{version} is downloaded and ready"))
+                    .size(12.0 * scale)
+                    .color(t.accent),
+            );
+            ui.add_space(6.0 * scale);
+            let _ = ui.label(
+                egui::RichText::new(format!("Saved to: {}", path.display()))
+                    .size(9.5 * scale)
+                    .color(t.dim2),
+            );
+            ui.add_space(8.0 * scale);
+            let _ = ui.label(
+                egui::RichText::new(
+                    "Close your DAW before running the installer. \
+                     The plugin file is locked while the DAW is open.",
+                )
+                .size(10.0 * scale)
+                .color(t.dim2),
+            );
+            ui.add_space(8.0 * scale);
+            if ui
+                .add(egui::Button::new(
+                    egui::RichText::new("Open Installer").size(11.0 * scale),
+                ))
+                .clicked()
+            {
+                if let Err(e) = crate::updater::launch_installer(&path) {
+                    ui.colored_label(Color32::from_rgb(0xEF, 0x44, 0x44), e);
+                }
+            }
+        }
+        UpdatePhase::Error(e) => {
+            ui.colored_label(
+                Color32::from_rgb(0xEF, 0x44, 0x44),
+                egui::RichText::new(format!("Update check failed: {e}")).size(11.0 * scale),
+            );
+        }
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_valid_orders() {
+        assert_eq!(
+            parse_texture_order(r#"<Order value="0,1,2,3,4,5"/>"#),
+            Some([0, 1, 2, 3, 4, 5])
+        );
+        assert_eq!(
+            parse_texture_order(r#"<Order value="5,4,3,2,1,0"/>"#),
+            Some([5, 4, 3, 2, 1, 0])
+        );
+        // Whitespace around the indices is tolerated.
+        assert_eq!(
+            parse_texture_order(r#"<Order value="0, 1, 2, 3, 4, 5"/>"#),
+            Some([0, 1, 2, 3, 4, 5])
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_orders() {
+        // Duplicate index.
+        assert_eq!(parse_texture_order(r#"<Order value="0,0,2,3,4,5"/>"#), None);
+        // Out of range.
+        assert_eq!(parse_texture_order(r#"<Order value="0,1,2,3,4,6"/>"#), None);
+        // Wrong element count.
+        assert_eq!(parse_texture_order(r#"<Order value="0,1,2,3,4"/>"#), None);
+        // Missing tag entirely (e.g. a preset without a TextureRack).
+        assert_eq!(parse_texture_order("<CloudReverb></CloudReverb>"), None);
+        // Non-numeric element.
+        assert_eq!(parse_texture_order(r#"<Order value="0,1,2,3,4,x"/>"#), None);
+    }
 }
