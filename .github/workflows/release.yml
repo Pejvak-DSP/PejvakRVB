@@ -58,7 +58,13 @@ jobs:
       - name: Create Windows Installer
         shell: pwsh
         run: |
-          # Create the install script that will be inside the SFX archive
+          # The nice-plug bundle names the plugin after its Cargo package
+          # ("Pejvak_RVB"), so the files are Pejvak_RVB.vst3 and
+          # Pejvak_RVB.clap (underscore, not space).
+          #
+          # The install script handles both the security-unblock and the
+          # copy into the system plugin folders. It gets embedded inside
+          # a self-extracting 7z archive.
           $bat_content = @"
           @echo off
           echo =====================================
@@ -74,7 +80,7 @@ jobs:
           mkdir "C:\Program Files\Common Files\CLAP" 2>nul
 
           echo Copying plugins to system folders...
-          copy /Y "PEJVAK RVB.vst3" "C:\Program Files\Common Files\VST3\PEJVAK RVB\"
+          copy /Y "Pejvak_RVB.vst3" "C:\Program Files\Common Files\VST3\PEJVAK RVB\"
           copy /Y "Pejvak_RVB.clap" "C:\Program Files\Common Files\CLAP\"
 
           echo.
@@ -96,7 +102,7 @@ jobs:
           }
           Get-Item "PEJVAK-RVB-windows-x64-setup.exe" | Select-Object Name, Length
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: windows-bundle
           path: PEJVAK-RVB-windows-x64-setup.exe
@@ -139,20 +145,24 @@ jobs:
 
       - name: Locate Bundle Directory
         run: |
-          # nice-plug places bundles in different locations depending
-          # on whether --target was passed:
-          #   - Without --target: target/bundled/
-          #   - With --target X:  target/X/release/bundled/
-          # We probe both so the workflow is robust to either layout.
+          # nice-plug names bundles after the Cargo package
+          # ("Pejvak_RVB"), not the plugin display name. Bundle paths
+          # depend on whether --target was passed:
+          #   Without --target: target/bundled/
+          #   With --target X:  target/X/release/bundled/
+          # We probe every candidate so the workflow is robust to
+          # either layout.
           echo "=== Available bundle directories: ==="
           find target -maxdepth 6 -type d \( -name "*.vst3" -o -name "*.clap" \) 2>/dev/null || true
 
-          BUNDLE_VST3=$(find target -maxdepth 6 -type d -name "PEJVAK RVB.vst3" 2>/dev/null | head -1)
+          BUNDLE_VST3=$(find target -maxdepth 6 -type d -name "Pejvak_RVB.vst3" 2>/dev/null | head -1)
 
           if [ -z "$BUNDLE_VST3" ]; then
-            echo "ERROR: Could not locate PEJVAK RVB.vst3 bundle."
+            echo "ERROR: Could not locate Pejvak_RVB.vst3 bundle."
             echo "Contents of target/ (top-level):"
             ls -la target/ || true
+            echo "Contents of target/bundled/ (if exists):"
+            ls -la target/bundled/ 2>/dev/null || true
             echo "Contents of target/aarch64-apple-darwin/release/ (if exists):"
             ls -la target/aarch64-apple-darwin/release/ 2>/dev/null || true
             echo "Contents of target/x86_64-apple-darwin/release/ (if exists):"
@@ -169,10 +179,10 @@ jobs:
 
       - name: Replace Binary with Universal Dylib
         run: |
-          # The nice-plug bundle puts the per-arch dylib inside
-          # Contents/MacOS/. We replace it with the universal one.
-          # The file may be named after the plugin ("PEJVAK RVB")
-          # rather than "libPejvak_RVB.dylib", so we use `find -path`.
+          # Each bundle's Contents/MacOS/ holds a per-arch dylib.
+          # We swap it for the universal one we just built. The binary
+          # is named after the plugin, so `find -type f` under MacOS
+          # is the safest way to hit every file we need to replace.
           MACOS_BIN_DIRS=$(find "$BUNDLE_DIR" -type d -path "*/Contents/MacOS")
           if [ -z "$MACOS_BIN_DIRS" ]; then
             echo "ERROR: No Contents/MacOS/ directory found in bundle."
@@ -186,43 +196,40 @@ jobs:
             find "$dir" -type f -exec chmod +x {} \;
           done
 
-          # Verify
+          # Verify the architecture of every binary in the bundle.
           echo "=== Architecture of the installed binary: ==="
           find "$BUNDLE_DIR" -type f -path "*/Contents/MacOS/*" \
             -exec lipo -info {} \;
 
       - name: Create macOS PKG
         run: |
-          # Strip the leading "v" from the tag for the pkgbuild version
-          # field (Apple's version format does not use a "v" prefix).
+          # pkgbuild wants a version without the leading "v".
           VERSION="${GITHUB_REF_NAME#v}"
           echo "PKG version: $VERSION"
 
           mkdir -p payload/Library/Audio/Plug-Ins/VST3
           mkdir -p payload/Library/Audio/Plug-Ins/CLAP
 
-          cp -R "$BUNDLE_DIR/PEJVAK RVB.vst3" payload/Library/Audio/Plug-Ins/VST3/
+          cp -R "$BUNDLE_DIR/Pejvak_RVB.vst3" payload/Library/Audio/Plug-Ins/VST3/
           cp -R "$BUNDLE_DIR/Pejvak_RVB.clap" payload/Library/Audio/Plug-Ins/CLAP/
 
-          # Remove quarantine attributes before packaging
-          xattr -cr "payload/Library/Audio/Plug-Ins/VST3/PEJVAK RVB.vst3"
+          # Remove quarantine attributes before packaging.
+          xattr -cr "payload/Library/Audio/Plug-Ins/VST3/Pejvak_RVB.vst3"
           xattr -cr "payload/Library/Audio/Plug-Ins/CLAP/Pejvak_RVB.clap"
 
-          # Build the PKG installer
           pkgbuild --root payload \
                    --identifier com.pejvakdsp.rvb \
                    --version "$VERSION" \
                    --install-location / \
                    PEJVAK-RVB-macos-universal.pkg
 
-          # Sanity check
           if [ ! -f "PEJVAK-RVB-macos-universal.pkg" ]; then
             echo "ERROR: PKG was not created."
             exit 1
           fi
           ls -lh PEJVAK-RVB-macos-universal.pkg
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: macos-bundle
           path: PEJVAK-RVB-macos-universal.pkg
@@ -264,14 +271,13 @@ jobs:
           tar -czvf ../../PEJVAK-RVB-linux-x64.tar.gz *
           cd ../..
 
-          # Sanity check
           if [ ! -f "PEJVAK-RVB-linux-x64.tar.gz" ]; then
             echo "ERROR: Linux archive was not created."
             exit 1
           fi
           ls -lh PEJVAK-RVB-linux-x64.tar.gz
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: linux-bundle
           path: PEJVAK-RVB-linux-x64.tar.gz
@@ -289,7 +295,7 @@ jobs:
           fetch-depth: 0
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: artifacts
 
@@ -298,6 +304,14 @@ jobs:
           mkdir -p release-assets
           find artifacts -type f \( -name "*.exe" -o -name "*.pkg" -o -name "*.tar.gz" \) \
             -exec cp {} release-assets/ \;
+
+          # Attach CHANGELOG.md as a downloadable asset too, so users
+          # can read the full history offline. The section for the
+          # current version is also used as the release body below.
+          if [ -f CHANGELOG.md ]; then
+            cp CHANGELOG.md release-assets/CHANGELOG.md
+          fi
+
           echo "=== Assets to upload ==="
           ls -lh release-assets/
 
@@ -326,12 +340,15 @@ jobs:
           echo "=== Release notes ==="
           cat release-notes.md
 
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: "PEJVAK RVB ${{ github.ref_name }}"
-          body_path: release-notes.md
-          draft: false
-          prerelease: false
-          files: release-assets/*
-          generate_release_notes: false
+      - name: Create release with gh CLI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # `gh` is pre-installed on every GitHub-hosted runner and is a
+          # native binary (no Node dependency), so it avoids the
+          # "Node 20 is deprecated" warning that third-party
+          # JS-based release actions trigger.
+          gh release create "${{ github.ref_name }}" \
+            --title "PEJVAK RVB ${{ github.ref_name }}" \
+            --notes-file release-notes.md \
+            release-assets/*
