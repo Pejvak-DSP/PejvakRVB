@@ -26,6 +26,9 @@ jobs:
       - name: Run DSP tests
         run: cargo test -p fdn_reverb_core
 
+      - name: Run plugin tests
+        run: cargo test -p Pejvak_RVB
+
       - name: Run clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -53,8 +56,9 @@ jobs:
         run: cargo nice-plug bundle Pejvak_RVB --release
 
       - name: Create Windows Installer
+        shell: pwsh
         run: |
-          # Create the install script
+          # Create the install script that will be inside the SFX archive
           $bat_content = @"
           @echo off
           echo =====================================
@@ -80,11 +84,18 @@ jobs:
 
           $bat_content | Out-File -FilePath target\bundled\install.bat -Encoding ASCII
 
-          # Package as a self-extracting EXE (runs install.bat automatically)
-          cd target\bundled
+          # Package as a self-extracting EXE
+          Push-Location target\bundled
           7z a -sfx -mx=9 -ms=on ..\..\PEJVAK-RVB-windows-x64-setup.exe .\*
-          cd ..\..
-          
+          Pop-Location
+
+          # Sanity check
+          if (-not (Test-Path "PEJVAK-RVB-windows-x64-setup.exe")) {
+            Write-Error "Windows installer was not created."
+            exit 1
+          }
+          Get-Item "PEJVAK-RVB-windows-x64-setup.exe" | Select-Object Name, Length
+
       - uses: actions/upload-artifact@v4
         with:
           name: windows-bundle
@@ -116,39 +127,100 @@ jobs:
       - name: Build for Intel
         run: cargo nice-plug bundle Pejvak_RVB --release --target x86_64-apple-darwin
 
-      - name: Create Universal Binary and Strip
+      - name: Create Universal Binary
         run: |
-          mkdir -p target/universal/release
           lipo -create \
             target/aarch64-apple-darwin/release/libPejvak_RVB.dylib \
             target/x86_64-apple-darwin/release/libPejvak_RVB.dylib \
-            -output target/universal/release/libPejvak_RVB.dylib
-          strip -x target/universal/release/libPejvak_RVB.dylib
+            -output /tmp/libPejvak_RVB_universal.dylib
+          strip -x /tmp/libPejvak_RVB_universal.dylib
+          echo "=== Universal binary architectures: ==="
+          lipo -info /tmp/libPejvak_RVB_universal.dylib
 
-      - name: Update Bundles with Universal Binary
+      - name: Locate Bundle Directory
         run: |
-          BUNDLE_DIR="target/bundled"
-          find "$BUNDLE_DIR" -type f -path "*/Contents/MacOS/*" -exec cp target/universal/release/libPejvak_RVB.dylib {} \;
-          find "$BUNDLE_DIR" -type f -path "*/Contents/MacOS/*" -exec chmod +x {} \;
+          # nice-plug places bundles in different locations depending
+          # on whether --target was passed:
+          #   - Without --target: target/bundled/
+          #   - With --target X:  target/X/release/bundled/
+          # We probe both so the workflow is robust to either layout.
+          echo "=== Available bundle directories: ==="
+          find target -maxdepth 6 -type d \( -name "*.vst3" -o -name "*.clap" \) 2>/dev/null || true
+
+          BUNDLE_VST3=$(find target -maxdepth 6 -type d -name "PEJVAK RVB.vst3" 2>/dev/null | head -1)
+
+          if [ -z "$BUNDLE_VST3" ]; then
+            echo "ERROR: Could not locate PEJVAK RVB.vst3 bundle."
+            echo "Contents of target/ (top-level):"
+            ls -la target/ || true
+            echo "Contents of target/aarch64-apple-darwin/release/ (if exists):"
+            ls -la target/aarch64-apple-darwin/release/ 2>/dev/null || true
+            echo "Contents of target/x86_64-apple-darwin/release/ (if exists):"
+            ls -la target/x86_64-apple-darwin/release/ 2>/dev/null || true
+            exit 1
+          fi
+
+          BUNDLE_DIR=$(dirname "$BUNDLE_VST3")
+          echo "=== Found bundle directory: $BUNDLE_DIR ==="
+          echo "Contents:"
+          ls -la "$BUNDLE_DIR"
+
+          echo "BUNDLE_DIR=$BUNDLE_DIR" >> "$GITHUB_ENV"
+
+      - name: Replace Binary with Universal Dylib
+        run: |
+          # The nice-plug bundle puts the per-arch dylib inside
+          # Contents/MacOS/. We replace it with the universal one.
+          # The file may be named after the plugin ("PEJVAK RVB")
+          # rather than "libPejvak_RVB.dylib", so we use `find -path`.
+          MACOS_BIN_DIRS=$(find "$BUNDLE_DIR" -type d -path "*/Contents/MacOS")
+          if [ -z "$MACOS_BIN_DIRS" ]; then
+            echo "ERROR: No Contents/MacOS/ directory found in bundle."
+            find "$BUNDLE_DIR" -type d
+            exit 1
+          fi
+
+          echo "$MACOS_BIN_DIRS" | while IFS= read -r dir; do
+            echo "Updating: $dir"
+            find "$dir" -type f -exec cp /tmp/libPejvak_RVB_universal.dylib {} \;
+            find "$dir" -type f -exec chmod +x {} \;
+          done
+
+          # Verify
+          echo "=== Architecture of the installed binary: ==="
+          find "$BUNDLE_DIR" -type f -path "*/Contents/MacOS/*" \
+            -exec lipo -info {} \;
 
       - name: Create macOS PKG
         run: |
-          # Create a payload directory with the proper Apple folder structure
+          # Strip the leading "v" from the tag for the pkgbuild version
+          # field (Apple's version format does not use a "v" prefix).
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "PKG version: $VERSION"
+
           mkdir -p payload/Library/Audio/Plug-Ins/VST3
           mkdir -p payload/Library/Audio/Plug-Ins/CLAP
-          
-          cp -R "target/bundled/PEJVAK RVB.vst3" payload/Library/Audio/Plug-Ins/VST3/
-          cp -R "target/bundled/Pejvak_RVB.clap" payload/Library/Audio/Plug-Ins/CLAP/
-          
-          # Remove quarantine attributes prior to packaging
+
+          cp -R "$BUNDLE_DIR/PEJVAK RVB.vst3" payload/Library/Audio/Plug-Ins/VST3/
+          cp -R "$BUNDLE_DIR/Pejvak_RVB.clap" payload/Library/Audio/Plug-Ins/CLAP/
+
+          # Remove quarantine attributes before packaging
           xattr -cr "payload/Library/Audio/Plug-Ins/VST3/PEJVAK RVB.vst3"
           xattr -cr "payload/Library/Audio/Plug-Ins/CLAP/Pejvak_RVB.clap"
-          
+
           # Build the PKG installer
           pkgbuild --root payload \
                    --identifier com.pejvakdsp.rvb \
-                   --version ${{ github.ref_name }} \
+                   --version "$VERSION" \
+                   --install-location / \
                    PEJVAK-RVB-macos-universal.pkg
+
+          # Sanity check
+          if [ ! -f "PEJVAK-RVB-macos-universal.pkg" ]; then
+            echo "ERROR: PKG was not created."
+            exit 1
+          fi
+          ls -lh PEJVAK-RVB-macos-universal.pkg
 
       - uses: actions/upload-artifact@v4
         with:
@@ -192,6 +264,13 @@ jobs:
           tar -czvf ../../PEJVAK-RVB-linux-x64.tar.gz *
           cd ../..
 
+          # Sanity check
+          if [ ! -f "PEJVAK-RVB-linux-x64.tar.gz" ]; then
+            echo "ERROR: Linux archive was not created."
+            exit 1
+          fi
+          ls -lh PEJVAK-RVB-linux-x64.tar.gz
+
       - uses: actions/upload-artifact@v4
         with:
           name: linux-bundle
@@ -206,6 +285,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -218,7 +299,7 @@ jobs:
           find artifacts -type f \( -name "*.exe" -o -name "*.pkg" -o -name "*.tar.gz" \) \
             -exec cp {} release-assets/ \;
           echo "=== Assets to upload ==="
-          ls -la release-assets/
+          ls -lh release-assets/
 
       - name: Extract release notes from CHANGELOG.md
         run: |
