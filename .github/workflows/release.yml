@@ -33,7 +33,7 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
   # ==========================================================================
-  # Windows Build & Inno Setup Installer
+  # Windows Build & Installer + Portable
   # ==========================================================================
   build-windows:
     name: Build Windows
@@ -58,16 +58,6 @@ jobs:
       - name: Create Inno Setup script
         shell: pwsh
         run: |
-          # Inno Setup is pre-installed on every GitHub-hosted Windows
-          # runner, so no installation step is needed. It produces a
-          # modern wizard with welcome / license / path / components /
-          # progress / finish, plus an uninstaller registered in
-          # Add or Remove Programs.
-          #
-          # The nice-plug bundle names its files after the Cargo package
-          # ("Pejvak_RVB"), so the source files are Pejvak_RVB.vst3 and
-          # Pejvak_RVB.clap.
-
           $iss = @'
           #define AppName "PEJVAK RVB"
           #define AppVersion GetEnv('APP_VERSION')
@@ -113,8 +103,8 @@ jobs:
           Name: "custom"; Description: "Custom installation"; Flags: iscustom
 
           [Components]
-          Name: "vst3"; Description: "VST3 plugin — most DAWs (Ableton, Cubase, Logic via bridge, Studio One, Reaper, Bitwig, FL)"; Types: full
-          Name: "clap"; Description: "CLAP plugin — Bitwig, Reaper 7+, Qtractor, other CLAP hosts"; Types: full
+          Name: "vst3"; Description: "VST3 plugin — most DAWs"; Types: full
+          Name: "clap"; Description: "CLAP plugin — Bitwig, Reaper 7+"; Types: full
 
           [Files]
           Source: "target\bundled\Pejvak_RVB.vst3"; DestDir: "{commoncf}\VST3\PEJVAK RVB"; Components: vst3; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -129,51 +119,94 @@ jobs:
 
           Set-Content -Path installer.iss -Value $iss -Encoding UTF8
 
-          Write-Host "=== Generated installer.iss ==="
-          Get-Content installer.iss | Select-Object -First 10
-
       - name: Compile installer with Inno Setup
         shell: pwsh
         env:
           APP_VERSION_RAW: ${{ github.ref_name }}
         run: |
-          # Strip leading "v" from the tag. Inno Setup wants a clean
-          # version string like "1.1.0", not "v1.1.0".
           $env:APP_VERSION = $env:APP_VERSION_RAW.TrimStart('v')
-          Write-Host "Building installer for version $env:APP_VERSION"
-
-          # ISCC.exe is pre-installed on GitHub Windows runners.
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) {
             $iscc = (Get-ChildItem "C:\Program Files*\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
                      Select-Object -First 1).FullName
           }
-          if (-not $iscc) {
-            Write-Error "Inno Setup compiler (ISCC.exe) not found on the runner."
-            exit 1
-          }
-          Write-Host "Using ISCC: $iscc"
-
+          if (-not $iscc) { Write-Error "ISCC.exe not found"; exit 1 }
           & $iscc /Q installer.iss
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Inno Setup compilation failed (exit code $LASTEXITCODE)."
-            exit 1
-          }
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
           $exe = "installer-output\PEJVAK-RVB-windows-x64-setup.exe"
-          if (-not (Test-Path $exe)) {
-            Write-Error "Installer EXE was not produced."
-            exit 1
-          }
+          if (-not (Test-Path $exe)) { Write-Error "EXE missing"; exit 1 }
           Get-Item $exe | Select-Object Name, Length
+
+      - name: Create Portable ZIP
+        shell: pwsh
+        run: |
+          # Portable version: everything a user needs to drop the
+          # plugin into a system plugin folder without an installer.
+          # This is what users want when they don't have admin rights,
+          # or when they want to test the plugin side by side with
+          # another version.
+          $portable_dir = "portable"
+          New-Item -ItemType Directory -Force -Path $portable_dir | Out-Null
+
+          Copy-Item -Recurse "target\bundled\Pejvak_RVB.vst3" "$portable_dir\Pejvak_RVB.vst3"
+          Copy-Item -Recurse "target\bundled\Pejvak_RVB.clap" "$portable_dir\Pejvak_RVB.clap"
+
+          $readme = @"
+          PEJVAK RVB — Windows Portable
+          =============================
+
+          This is the portable version of the PEJVAK RVB plugin.
+          No installer, no registry changes, no uninstaller.
+
+          MANUAL INSTALLATION
+          -------------------
+          1. Create the plugin folders if they do not exist:
+
+               C:\Program Files\Common Files\VST3\PEJVAK RVB\
+               C:\Program Files\Common Files\CLAP\
+
+             (You will need administrator rights for these.)
+
+          2. Copy Pejvak_RVB.vst3 to:
+               C:\Program Files\Common Files\VST3\PEJVAK RVB\
+
+          3. Copy Pejvak_RVB.clap to:
+               C:\Program Files\Common Files\CLAP\
+
+          4. Open your DAW and rescan plugins.
+
+          REMOVING
+          --------
+          Simply delete the folders above.
+
+          If Windows Defender warns about the files, right-click the
+          extracted folder and choose Properties > Unblock. Or run
+          in PowerShell as administrator:
+
+              Get-ChildItem -Recurse | Unblock-File
+
+          For updates, use the plugin's built-in "Check for updates"
+          menu, or visit:
+              https://github.com/Pejvak-DSP/PejvakRVB/releases
+          "@
+          Set-Content -Path "$portable_dir\README.txt" -Value $readme -Encoding UTF8
+
+          Compress-Archive -Path "$portable_dir\*" `
+                           -DestinationPath "PEJVAK-RVB-windows-x64-portable.zip" `
+                           -Force
+
+          Get-Item "PEJVAK-RVB-windows-x64-portable.zip" | Select-Object Name, Length
 
       - uses: actions/upload-artifact@v5
         with:
           name: windows-bundle
-          path: installer-output/PEJVAK-RVB-windows-x64-setup.exe
+          path: |
+            installer-output/PEJVAK-RVB-windows-x64-setup.exe
+            PEJVAK-RVB-windows-x64-portable.zip
 
   # ==========================================================================
-  # macOS Build & PKG Installer (Universal Binary)
+  # macOS Build & PKG Installer + Portable
   # ==========================================================================
   build-macos:
     name: Build macOS
@@ -205,110 +238,138 @@ jobs:
             target/x86_64-apple-darwin/release/libPejvak_RVB.dylib \
             -output /tmp/libPejvak_RVB_universal.dylib
           strip -x /tmp/libPejvak_RVB_universal.dylib
-          echo "=== Universal binary architectures: ==="
           lipo -info /tmp/libPejvak_RVB_universal.dylib
 
       - name: Locate Bundle Directory
         run: |
-          echo "=== Available bundle directories: ==="
-          find target -maxdepth 6 -type d \( -name "*.vst3" -o -name "*.clap" \) 2>/dev/null || true
-
           BUNDLE_VST3=$(find target -maxdepth 6 -type d -name "Pejvak_RVB.vst3" 2>/dev/null | head -1)
-
           if [ -z "$BUNDLE_VST3" ]; then
             echo "ERROR: Could not locate Pejvak_RVB.vst3 bundle."
-            ls -la target/ || true
-            ls -la target/bundled/ 2>/dev/null || true
+            ls -la target/ target/bundled/ 2>/dev/null || true
             exit 1
           fi
-
           BUNDLE_DIR=$(dirname "$BUNDLE_VST3")
-          echo "=== Found bundle directory: $BUNDLE_DIR ==="
-          ls -la "$BUNDLE_DIR"
-
           echo "BUNDLE_DIR=$BUNDLE_DIR" >> "$GITHUB_ENV"
+          echo "Found: $BUNDLE_DIR"
 
       - name: Replace Binary with Universal Dylib
         run: |
           MACOS_BIN_DIRS=$(find "$BUNDLE_DIR" -type d -path "*/Contents/MacOS")
           if [ -z "$MACOS_BIN_DIRS" ]; then
-            echo "ERROR: No Contents/MacOS/ directory found in bundle."
-            find "$BUNDLE_DIR" -type d
+            echo "ERROR: No Contents/MacOS/ directory found."
             exit 1
           fi
-
           echo "$MACOS_BIN_DIRS" | while IFS= read -r dir; do
-            echo "Updating: $dir"
             find "$dir" -type f -exec cp /tmp/libPejvak_RVB_universal.dylib {} \;
             find "$dir" -type f -exec chmod +x {} \;
           done
-
-          echo "=== Architecture of the installed binary: ==="
           find "$BUNDLE_DIR" -type f -path "*/Contents/MacOS/*" -exec lipo -info {} \;
+
+      # ---------- Portable ZIP (built first so the .vst3 and .clap ----------
+      # ---------- in the PKG payload and the ZIP are identical)   ----------
+      - name: Create Portable ZIP
+        run: |
+          mkdir -p portable
+          cp -R "$BUNDLE_DIR/Pejvak_RVB.vst3" portable/
+          cp -R "$BUNDLE_DIR/Pejvak_RVB.clap" portable/
+
+          xattr -cr "portable/Pejvak_RVB.vst3"
+          xattr -cr "portable/Pejvak_RVB.clap"
+
+          cat > portable/README.txt <<'EOF'
+          PEJVAK RVB — macOS Portable (Universal Binary)
+          ==============================================
+
+          This is the portable version of the PEJVAK RVB plugin.
+          It runs natively on both Apple Silicon and Intel Macs.
+
+          MANUAL INSTALLATION
+          -------------------
+          1. Create the plugin folders if they do not exist:
+
+               ~/Library/Audio/Plug-Ins/VST3/
+               ~/Library/Audio/Plug-Ins/CLAP/
+
+             Or, for a system-wide install:
+
+               /Library/Audio/Plug-Ins/VST3/
+               /Library/Audio/Plug-Ins/CLAP/
+               (requires sudo)
+
+          2. Copy Pejvak_RVB.vst3 to:
+               ~/Library/Audio/Plug-Ins/VST3/
+
+          3. Copy Pejvak_RVB.clap to:
+               ~/Library/Audio/Plug-Ins/CLAP/
+
+          4. Open your DAW and rescan plugins.
+
+          REMOVING
+          --------
+          Simply delete the two files above.
+
+          macOS GATEKEEPER NOTE
+          ---------------------
+          If macOS shows "cannot be opened because the developer
+          cannot be verified", open System Settings > Privacy &
+          Security > "Open Anyway". This is only necessary once.
+
+          Or remove the quarantine flag manually in Terminal:
+
+              xattr -dr com.apple.quarantine \
+                ~/Library/Audio/Plug-Ins/VST3/Pejvak_RVB.vst3
+              xattr -dr com.apple.quarantine \
+                ~/Library/Audio/Plug-Ins/CLAP/Pejvak_RVB.clap
+
+          For updates, use the plugin's built-in "Check for updates"
+          menu, or visit:
+              https://github.com/Pejvak-DSP/PejvakRVB/releases
+          EOF
+
+          # ditto keeps symlinks and executable bits; the standard
+          # `zip` command mangles them on some macOS versions.
+          ditto -c -k --sequesterRsrc --keepParent portable \
+            PEJVAK-RVB-macos-universal-portable.zip
+
+          ls -lh PEJVAK-RVB-macos-universal-portable.zip
 
       - name: Create PKG payload
         run: |
           mkdir -p payload/Library/Audio/Plug-Ins/VST3
           mkdir -p payload/Library/Audio/Plug-Ins/CLAP
-
-          cp -R "$BUNDLE_DIR/Pejvak_RVB.vst3" payload/Library/Audio/Plug-Ins/VST3/
-          cp -R "$BUNDLE_DIR/Pejvak_RVB.clap" payload/Library/Audio/Plug-Ins/CLAP/
-
-          xattr -cr "payload/Library/Audio/Plug-Ins/VST3/Pejvak_RVB.vst3"
-          xattr -cr "payload/Library/Audio/Plug-Ins/CLAP/Pejvak_RVB.clap"
+          cp -R "portable/Pejvak_RVB.vst3" payload/Library/Audio/Plug-Ins/VST3/
+          cp -R "portable/Pejvak_RVB.clap" payload/Library/Audio/Plug-Ins/CLAP/
 
       - name: Build component PKG
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          echo "PKG version: $VERSION"
-
           pkgbuild --root payload \
                    --identifier com.pejvakdsp.rvb \
                    --version "$VERSION" \
                    --install-location / \
                    PEJVAK-RVB-component.pkg
 
-          ls -lh PEJVAK-RVB-component.pkg
-
-      - name: Create installer resources (welcome + license)
+      - name: Create installer resources
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-
           mkdir -p resources
-
-          # Welcome screen — shown first when the user opens the PKG.
           cat > resources/welcome.html <<'HTML'
           <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <style>
-              body { font-family: -apple-system, sans-serif; font-size: 13px; color: #1d1d1f; padding: 20px; }
-              h1 { font-size: 20px; color: #007aff; margin-top: 0; }
-              p { line-height: 1.5; margin: 12px 0; }
-              ul { line-height: 1.7; }
-              code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
-            </style>
-          </head>
-          <body>
-            <h1>PEJVAK RVB</h1>
-            <p><strong>Hybrid Algorithmic Reverb — Dual Engine. Pure Rust.</strong></p>
-            <p>This installer will place the following files on your Mac:</p>
-            <ul>
-              <li><code>~/Library/Audio/Plug-Ins/VST3/Pejvak_RVB.vst3</code></li>
-              <li><code>~/Library/Audio/Plug-Ins/CLAP/Pejvak_RVB.clap</code></li>
-            </ul>
-            <p>After installation, open your DAW and rescan plugins. The plugin will appear as <strong>PEJVAK RVB</strong>.</p>
-            <p>Click <strong>Continue</strong> to proceed.</p>
-          </body>
-          </html>
+          <html><head><meta charset="utf-8"><style>
+          body{font-family:-apple-system,sans-serif;font-size:13px;color:#1d1d1f;padding:20px}
+          h1{font-size:20px;color:#007aff;margin-top:0}p{line-height:1.5;margin:12px 0}
+          code{background:#f0f0f0;padding:2px 6px;border-radius:4px;font-size:12px}
+          </style></head><body>
+          <h1>PEJVAK RVB</h1>
+          <p><strong>Hybrid Algorithmic Reverb — Dual Engine. Pure Rust.</strong></p>
+          <p>This installer places:</p>
+          <p><code>~/Library/Audio/Plug-Ins/VST3/Pejvak_RVB.vst3</code><br>
+             <code>~/Library/Audio/Plug-Ins/CLAP/Pejvak_RVB.clap</code></p>
+          <p>Rescan plugins in your DAW. The plugin appears as <strong>PEJVAK RVB</strong>.</p>
+          </body></html>
           HTML
-
-          # License screen.
           cp LICENSE resources/LICENSE.txt
 
-          # Distribution manifest — tells productbuild which screens to
-          # show and which component PKG to install.
           cat > distribution.xml <<XML
           <?xml version="1.0" encoding="utf-8"?>
           <installer-gui-script minSpecVersion="2">
@@ -320,41 +381,31 @@ jobs:
               <license file="LICENSE.txt" mime-type="text/plain"/>
               <pkg-ref id="com.pejvakdsp.rvb"/>
               <choices-outline>
-                  <line choice="default">
-                      <line choice="com.pejvakdsp.rvb"/>
-                  </line>
+                  <line choice="default"><line choice="com.pejvakdsp.rvb"/></line>
               </choices-outline>
               <choice id="default"/>
-              <choice id="com.pejvakdsp.rvb" visible="false">
-                  <pkg-ref id="com.pejvakdsp.rvb"/>
-              </choice>
+              <choice id="com.pejvakdsp.rvb" visible="false"><pkg-ref id="com.pejvakdsp.rvb"/></choice>
               <pkg-ref id="com.pejvakdsp.rvb" version="${VERSION}" onConclusion="none">PEJVAK-RVB-component.pkg</pkg-ref>
           </installer-gui-script>
           XML
 
-          echo "=== Resources ==="
-          ls -la resources/
-
-      - name: Build final PKG (with welcome + license)
+      - name: Build final PKG
         run: |
           productbuild --distribution distribution.xml \
                        --package-path . \
                        --resources resources \
                        PEJVAK-RVB-macos-universal.pkg
-
-          if [ ! -f "PEJVAK-RVB-macos-universal.pkg" ]; then
-            echo "ERROR: PKG was not created."
-            exit 1
-          fi
           ls -lh PEJVAK-RVB-macos-universal.pkg
 
       - uses: actions/upload-artifact@v5
         with:
           name: macos-bundle
-          path: PEJVAK-RVB-macos-universal.pkg
+          path: |
+            PEJVAK-RVB-macos-universal.pkg
+            PEJVAK-RVB-macos-universal-portable.zip
 
   # ==========================================================================
-  # Linux Build & DEB + tar.gz
+  # Linux Build & DEB + tar.gz (tar.gz IS the portable version)
   # ==========================================================================
   build-linux:
     name: Build Linux
@@ -387,17 +438,9 @@ jobs:
       - name: Create DEB package
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          echo "DEB version: $VERSION"
-
-          # Debian package layout — system-wide install to the standard
-          # VST3 and CLAP locations.
-          mkdir -p deb/DEBIAN
-          mkdir -p deb/usr/lib/vst3
-          mkdir -p deb/usr/lib/clap
-
+          mkdir -p deb/DEBIAN deb/usr/lib/vst3 deb/usr/lib/clap
           cp -R "target/bundled/Pejvak_RVB.vst3" deb/usr/lib/vst3/
           cp -R "target/bundled/Pejvak_RVB.clap" deb/usr/lib/clap/
-
           cat > deb/DEBIAN/control <<EOF
           Package: pejvak-rvb
           Version: ${VERSION}
@@ -410,26 +453,70 @@ jobs:
            Dual-engine algorithmic reverb (CloudSeed + FFDN) with Texture Rack
            and built-in updater. Pure Rust, GPL-3.0-or-later.
           EOF
-
-          # The .deb must be built with root-owned files for system install.
           dpkg-deb --build --root-owner-group deb PEJVAK-RVB-linux-x64.deb
-
-          if [ ! -f "PEJVAK-RVB-linux-x64.deb" ]; then
-            echo "ERROR: DEB package was not created."
-            exit 1
-          fi
           ls -lh PEJVAK-RVB-linux-x64.deb
 
-      - name: Create tar.gz (for non-Debian distributions)
+      - name: Create Portable tar.gz
         run: |
-          cd target/bundled
-          tar -czvf ../../PEJVAK-RVB-linux-x64.tar.gz *
-          cd ../..
+          mkdir -p portable
+          cp -R "target/bundled/Pejvak_RVB.vst3" portable/
+          cp -R "target/bundled/Pejvak_RVB.clap" portable/
 
-          if [ ! -f "PEJVAK-RVB-linux-x64.tar.gz" ]; then
-            echo "ERROR: tar.gz archive was not created."
-            exit 1
-          fi
+          cat > portable/README.txt <<'EOF'
+          PEJVAK RVB — Linux Portable
+          ===========================
+
+          This is the portable version of the PEJVAK RVB plugin.
+          For Debian / Ubuntu users, prefer the .deb package —
+          it handles installation and provides an uninstall entry.
+
+          MANUAL INSTALLATION
+          -------------------
+          1. Create the plugin folders if they do not exist:
+
+               ~/.vst3/
+               ~/.clap/
+
+             Or, for a system-wide install:
+
+               /usr/lib/vst3/
+               /usr/lib/clap/
+               (requires sudo)
+
+          2. Copy the VST3 folder to:
+               ~/.vst3/Pejvak_RVB.vst3/
+
+             The final path should be:
+               ~/.vst3/Pejvak_RVB.vst3/Contents/x86_64-linux/Pejvak_RVB.so
+
+          3. Copy the CLAP file to:
+               ~/.clap/Pejvak_RVB.clap
+
+          4. Open your DAW and rescan plugins.
+
+          REMOVING
+          --------
+          Simply delete the two files above.
+
+          SYSTEM DEPENDENCIES
+          -------------------
+          The plugin needs the standard X11, OpenGL, and ALSA
+          libraries. On Debian / Ubuntu:
+
+              sudo apt-get install -y \
+                libx11-6 libxcursor1 libgl1 libglu1-mesa libasound2
+
+          On Fedora:
+              sudo dnf install libX11 libXcursor mesa-libGL alsa-lib
+
+          For updates, use the plugin's built-in "Check for updates"
+          menu, or visit:
+              https://github.com/Pejvak-DSP/PejvakRVB/releases
+          EOF
+
+          cd portable
+          tar -czvf ../PEJVAK-RVB-linux-x64.tar.gz *
+          cd ..
           ls -lh PEJVAK-RVB-linux-x64.tar.gz
 
       - uses: actions/upload-artifact@v5
@@ -440,7 +527,7 @@ jobs:
             PEJVAK-RVB-linux-x64.tar.gz
 
   # ==========================================================================
-  # Create GitHub Release (single, after all builds)
+  # Create GitHub Release
   # ==========================================================================
   release:
     name: Create GitHub Release
@@ -460,7 +547,7 @@ jobs:
         run: |
           mkdir -p release-assets
           find artifacts -type f \( \
-              -name "*.exe" -o -name "*.pkg" -o -name "*.deb" -o -name "*.tar.gz" \
+              -name "*.exe" -o -name "*.pkg" -o -name "*.deb" -o -name "*.tar.gz" -o -name "*.zip" \
             \) -exec cp {} release-assets/ \;
 
           if [ -f CHANGELOG.md ]; then
@@ -479,29 +566,23 @@ jobs:
               found && /^## \[/ && index($0, ver) == 0 { exit }
               found { print }
             ' CHANGELOG.md > release-notes.md
-
             if [ ! -s release-notes.md ]; then
-              {
-                echo "## What's Changed in $GITHUB_REF_NAME"
+              { echo "## What's Changed in $GITHUB_REF_NAME"
                 git log --pretty=format:"* %s (%h)" -20
               } > release-notes.md
             fi
           else
-            {
-              echo "## What's Changed in $GITHUB_REF_NAME"
+            { echo "## What's Changed in $GITHUB_REF_NAME"
               git log --pretty=format:"* %s (%h)" -20
             } > release-notes.md
           fi
-          echo "=== Release notes ==="
           cat release-notes.md
 
       - name: Create release with gh CLI
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Remove any previous release with the same tag (retry-safe).
           if gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
-            echo "Release ${{ github.ref_name }} already exists — deleting for retry."
             gh release delete "${{ github.ref_name }}" --yes
           fi
 

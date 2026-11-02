@@ -183,32 +183,53 @@ fn check_inner() -> CheckResult {
     // asset name. GitHub does not expose a structured platform field,
     // so the release workflow must name assets consistently.
     let os = std::env::consts::OS;
+    // Prefer the installer asset for each platform. Portable archives
+    // (.zip, .tar.gz) are offered in the release for users who want
+    // manual installation, but the updater should hand the user the
+    // installer so "Check for updates → Download & Install" produces
+    // the same one-click experience the original installation did.
+    //
+    // For Linux, prefer .deb (installer-like) but accept .tar.gz
+    // as a fallback for non-Debian distributions.
     let asset = json
         .get("assets")
         .and_then(|v| v.as_array())
         .and_then(|arr| {
-            arr.iter().find_map(|a| {
-                let name = a.get("name")?.as_str()?;
-                let lower = name.to_lowercase();
-                let matches = match os {
-                    "windows" => lower.contains("windows") || lower.contains("win"),
-                    "macos" => lower.contains("macos") || lower.contains("darwin"),
-                    "linux" => lower.contains("linux"),
-                    _ => false,
-                };
-                if matches {
+            let find = |pred: &dyn Fn(&str) -> bool| -> Option<(String, String, Option<String>)> {
+                arr.iter().find_map(|a| {
+                    let name = a.get("name")?.as_str()?;
+                    if !pred(&name.to_lowercase()) {
+                        return None;
+                    }
                     let url = a.get("browser_download_url")?.as_str()?.to_string();
-                    // GitHub computes this at upload time and never
-                    // changes it. Format: "sha256:<64 hex>".
                     let digest = a
                         .get("digest")
                         .and_then(|d| d.as_str())
                         .map(|s| s.to_string());
                     Some((url, name.to_string(), digest))
-                } else {
-                    None
-                }
-            })
+                })
+            };
+
+            match os {
+                "windows" => find(&|l| {
+                    (l.contains("windows") || l.contains("win"))
+                        && l.ends_with("-setup.exe")
+                }),
+                "macos" => find(&|l| {
+                    (l.contains("macos") || l.contains("darwin"))
+                        && l.ends_with(".pkg")
+                }),
+                "linux" => find(&|l| {
+                    l.contains("linux") && l.ends_with(".deb")
+                })
+                .or_else(|| {
+                    // Fallback: distros that are not Debian-based
+                    // will not be able to `dpkg -i` the .deb, so
+                    // fall through to the tarball.
+                    find(&|l| l.contains("linux") && l.ends_with(".tar.gz"))
+                }),
+                _ => None,
+            }
         });
 
     let (url, name, digest) = match asset {
@@ -351,26 +372,27 @@ pub fn launch_installer(path: &std::path::Path) -> Result<(), String> {
         return Err(format!("Installer not found: {}", path.display()));
     }
 
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new(path)
-            .spawn()
-            .map_err(|e| format!("launch: {e}"))?;
-    }
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(path)
-            .spawn()
-            .map_err(|e| format!("launch: {e}"))?;
-    }
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(path)
-            .spawn()
-            .map_err(|e| format!("launch: {e}"))?;
-    }
+    let path = path.to_path_buf();
+
+    // Inno Setup installers take 1-3 seconds to extract and launch
+    // their own UI. On the UI thread that would look like a hang to
+    // the DAW's watchdog. Spawning a thread keeps the plugin
+    // responsive while the installer starts up.
+    std::thread::spawn(move || {
+        #[cfg(target_os = "windows")]
+        {
+            let _ = std::process::Command::new(&path).spawn();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::process::Command::new("open").arg(&path).spawn();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
+        }
+    });
+
     Ok(())
 }
 
@@ -382,7 +404,11 @@ pub fn open_releases_page() {
         "https://github.com/{}/{}/releases/latest",
         GITHUB_OWNER, GITHUB_REPO
     );
-    let _ = open_url(&url);
+    // Same reasoning as manual.rs::open_in_browser — the shell call
+    // can block for seconds, so run it off the UI thread.
+    std::thread::spawn(move || {
+        let _ = open_url(&url);
+    });
 }
 
 fn open_url(url: &str) -> Result<(), String> {
