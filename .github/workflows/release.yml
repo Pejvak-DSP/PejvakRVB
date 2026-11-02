@@ -55,6 +55,20 @@ jobs:
       - name: Build Plugin
         run: cargo nice-plug bundle Pejvak_RVB --release
 
+      # Unblock the bundled plugin files BEFORE the Inno Setup installer
+      # collects them. Files produced by `cargo` on the runner normally
+      # have no Mark-of-the-Web (MOTW), but being explicit here is a
+      # cheap defence-in-depth: it guarantees the installer never carries
+      # MOTW into the installed plugin. MOTW on the installed .vst3 /
+      # .clap is what caused Windows Defender to scan the plugin on
+      # every first load and hang the DAW when opening the manual.
+      - name: Unblock bundled files before packaging
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path target\bundled -Recurse | Unblock-File
+          Write-Host "Bundled files unblocked:"
+          Get-ChildItem -Path target\bundled -Recurse | Select-Object FullName
+
       - name: Create Inno Setup script
         shell: pwsh
         run: |
@@ -88,7 +102,7 @@ jobs:
           ArchitecturesAllowed=x64
           ArchitecturesInstallIn64BitMode=x64
           UninstallDisplayName={#AppName}
-          UninstallDisplayIcon={commoncf}\VST3\PEJVAK RVB\Pejvak_RVB.vst3
+          UninstallDisplayIcon={uninstallexe}
           VersionInfoVersion={#AppVersion}
           VersionInfoCompany={#Publisher}
           VersionInfoDescription={#AppName} Installer
@@ -114,11 +128,23 @@ jobs:
           Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 
           [Run]
+          ; Strip Mark-of-the-Web from the installed plugin files. This is
+          ; essential: without it Windows Defender treats the .vst3 and
+          ; .clap as downloaded-from-the-internet and scans them on every
+          ; first load, which can hang the DAW for several seconds.
+          ;
+          ; * -LiteralPath avoids wildcard expansion issues.
+          ; * waituntilterminated ensures the unblock completes before the
+          ;   user can launch the DAW (nowait would race with installation).
+          ; * Two separate calls: the VST3 is a directory tree, the CLAP
+          ;   is a single file, so they need different -Path arguments.
+          Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Get-ChildItem -LiteralPath '{commoncf}\VST3\PEJVAK RVB' -Recurse -ErrorAction SilentlyContinue | Unblock-File; Get-ChildItem -LiteralPath '{commoncf}\CLAP' -Filter 'Pejvak_RVB.clap' -ErrorAction SilentlyContinue | Unblock-File"""; Flags: runhidden waituntilterminated
           Filename: "{#UpdateURL}"; Description: "Open the project page"; Flags: postinstall shellexec nowait runasoriginaluser
-          Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Get-ChildItem -Path '{commoncf}\VST3\PEJVAK RVB\*','{commoncf}\CLAP\Pejvak_RVB.clap' -Recurse -ErrorAction SilentlyContinue | Unblock-File"""; Flags: runhidden waituntilterminated
           '@
 
           Set-Content -Path installer.iss -Value $iss -Encoding UTF8
+          Write-Host "=== Generated installer.iss ==="
+          Get-Content installer.iss | Select-Object -First 20
 
       - name: Compile installer with Inno Setup
         shell: pwsh
@@ -142,11 +168,11 @@ jobs:
       - name: Create Portable ZIP
         shell: pwsh
         run: |
-          # Portable version: everything a user needs to drop the
-          # plugin into a system plugin folder without an installer.
-          # This is what users want when they don't have admin rights,
-          # or when they want to test the plugin side by side with
-          # another version.
+          # Portable version: everything a user needs to drop the plugin
+          # into a system plugin folder without an installer. This is
+          # what users want when they don't have admin rights, or when
+          # they want to test the plugin side by side with another
+          # version.
           $portable_dir = "portable"
           New-Item -ItemType Directory -Force -Path $portable_dir | Out-Null
 
@@ -266,8 +292,6 @@ jobs:
           done
           find "$BUNDLE_DIR" -type f -path "*/Contents/MacOS/*" -exec lipo -info {} \;
 
-      # ---------- Portable ZIP (built first so the .vst3 and .clap ----------
-      # ---------- in the PKG payload and the ZIP are identical)   ----------
       - name: Create Portable ZIP
         run: |
           mkdir -p portable
@@ -327,8 +351,6 @@ jobs:
               https://github.com/Pejvak-DSP/PejvakRVB/releases
           EOF
 
-          # ditto keeps symlinks and executable bits; the standard
-          # `zip` command mangles them on some macOS versions.
           ditto -c -k --sequesterRsrc --keepParent portable \
             PEJVAK-RVB-macos-universal-portable.zip
 
