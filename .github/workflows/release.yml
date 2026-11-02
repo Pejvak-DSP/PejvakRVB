@@ -115,6 +115,7 @@ jobs:
 
           [Run]
           Filename: "{#UpdateURL}"; Description: "Open the project page"; Flags: postinstall shellexec nowait runasoriginaluser
+          Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Get-ChildItem -Path '{commoncf}\VST3\PEJVAK RVB\*','{commoncf}\CLAP\Pejvak_RVB.clap' -Recurse -ErrorAction SilentlyContinue | Unblock-File"""; Flags: runhidden waituntilterminated
           '@
 
           Set-Content -Path installer.iss -Value $iss -Encoding UTF8

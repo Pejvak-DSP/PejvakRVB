@@ -2393,6 +2393,9 @@ impl Plugin for PejvakRvbPlugin {
         #[cfg(feature = "gui-egui")]
         self.params.plugin_active.store(true, Ordering::Relaxed);
 
+        #[cfg(feature = "gui-egui")]
+         crate::manual::init();
+
         let ctrl = ReverbController::new(buffer_config.sample_rate as i32);
         self.engine = Some(ctrl);
 

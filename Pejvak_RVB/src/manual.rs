@@ -1,74 +1,106 @@
 //! Bundled user manual.
 //!
-//! The manual is stored as a single self-contained HTML file inside
-//! the plugin binary. When the user picks "Manual" from the ☰ menu we
-//! write it to a version-tagged file in the user's config directory
-//! and hand it to the OS to open in the default browser.
+//! # Why this file uses a pre-spawned worker thread
 //!
-//! # Why HTML, not PDF
+//! Building locally works, but the same source built by GitHub and
+//! downloaded carries Windows' "Mark of the Web" attribute. AV software
+//! treats such binaries far more aggressively: it scans the DLL longer
+//! on load, hooks `CreateThread` to inspect new thread entry points,
+//! and defers process spawns for inspection.
 //!
-//! HTML gives us three things a bundled PDF cannot:
-//!   * zero binary dependencies (no `printpdf` / `genpdf` crate),
-//!   * full CSS styling that matches the plugin's own dark theme,
-//!   * free upgrades — updating the manual is just editing a text
-//!     file, with no build-time toolchain for PDF generation.
+//! Any of those can exceed a DAW's watchdog timeout when triggered
+//! from the UI thread. The observed symptom is the ☰ menu freezing,
+//! then the DAW being killed by its own unresponsive-plugin watchdog.
 //!
-//! If a user needs a PDF, the browser's own "Print → Save as PDF"
-//! produces one from the same source.
+//! The defense is architectural, not a band-aid:
+//!
+//! 1. A **worker thread is spawned once at plugin init**. Clicks
+//!    never trigger `thread::spawn`, which is what AV scans.
+//!
+//! 2. **Clicks are pure memory operations.** `mpsc::Sender::send`
+//!    is a lock + memcpy + wakeup; it cannot block on I/O, thread
+//!    creation, or shell dispatch. The UI thread returns in
+//!    microseconds regardless of what the worker is doing.
+//!
+//! 3. **File I/O targets `%TEMP%`**, which AV scans far less
+//!    aggressively than `%APPDATA%` (roaming, OneDrive, network
+//!    shares).
+//!
+//! 4. **The shell call is `explorer.exe`**, a plain process spawn.
+//!    No COM, no STA, no `ShellExecuteW` deadlock.
+//!
+//! If the worker thread ever hangs (AV blocks a spawn, browser is
+//! unresponsive, disk is full), **only the worker is stuck**. The UI
+//! stays free. The next click queues silently. The DAW is never
+//! at risk.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{channel, Sender};
+use std::sync::OnceLock;
 
-/// The manual source, embedded at compile time.
 const MANUAL_HTML: &str = include_str!("../../manual/manual.html");
-
-/// The PEJVAK DSP logo, embedded at compile time. Referenced by the
-/// manual HTML as `<img src="logo.png">`, so the file must be written
-/// alongside the HTML on disk.
 const LOGO_PNG: &[u8] = include_bytes!("../../manual/logo.png");
+
+/// The worker's request channel. `OnceLock` ensures it's initialized
+/// exactly once even if `init()` is called from multiple places.
+static WORKER_TX: OnceLock<Sender<()>> = OnceLock::new();
+
+/// Call once at plugin init, before any user interaction.
+///
+/// Idempotent. Safe to call from `Plugin::activate`, from
+/// `PejvakEguiApp::build`, or both.
+///
+/// Spawning the worker here means clicks never pay thread-creation
+/// cost, which is one of the things AV can delay on a
+/// downloaded-from-the-internet binary.
+pub fn init() {
+    WORKER_TX.get_or_init(|| {
+        let (tx, rx) = channel::<()>();
+
+        // `thread::Builder` (not `thread::spawn`) so a failed spawn
+        // is a `Result` instead of a panic. If the OS refuses to
+        // create the thread, `open_in_browser` becomes a harmless
+        // no-op rather than crashing.
+        let _ = std::thread::Builder::new()
+            .name("pejvak-manual".to_string())
+            .stack_size(64 * 1024) // small, dedicated stack
+            .spawn(move || {
+                while rx.recv().is_ok() {
+                    // Coalesce rapid clicks: if the user clicked
+                    // Manual three times while the first request was
+                    // still being processed, they get one tab.
+                    while rx.try_recv().is_ok() {}
+
+                    // All the slow work happens here, safely off
+                    // the UI thread.
+                    if let Some(path) = write_manual_to_disk() {
+                        open_path(&path);
+                    }
+                }
+            });
+
+        tx
+    });
+}
 
 /// Opens the user manual in the OS's default browser.
 ///
-/// The file is written to a version-tagged path in the plugin's
-/// config directory, so a plugin update automatically produces a new
-/// file (and a browser that was caching the old one picks up the new
-/// content the next time the user opens it).
-///
-/// Silent on failure — if writing or opening the file fails, the
-/// plugin keeps running. There is no meaningful recovery path on the
-/// audio thread's behalf and no useful UI to show given how rare a
-/// failure here is.
+/// Returns immediately. All work happens on the worker thread
+/// spawned by [`init()`]. If `init()` was never called, this is
+/// a harmless no-op.
 pub fn open_in_browser() {
-    let Some(path) = write_manual_to_disk() else {
-        return;
-    };
-    open_path(&path);
+    if let Some(tx) = WORKER_TX.get() {
+        let _ = tx.send(());
+    }
 }
 
-/// Writes the manual and its companion logo to
-/// `<config>/PEJVAK RVB/`.
-///
-/// A fresh HTML file is written on every open, with a nanosecond
-/// timestamp in its name, so the browser never serves a cached
-/// copy of an older manual. The logo keeps a fixed filename
-/// (`logo.png`) because the HTML references it as a sibling file;
-/// its bytes are rewritten every time so a plugin update that
-/// carries a new logo propagates without needing a manual cleanup.
-///
-/// Old timestamped `Manual-*.html` files accumulate in the folder.
-/// They are harmless (a few dozen KB each) and the user can delete
-/// them from the ☰ → Manual folder at any time.
 fn write_manual_to_disk() -> Option<PathBuf> {
     let dir = manual_dir()?;
     let version = env!("CARGO_PKG_VERSION");
 
-    // Fixed-filename logo, referenced by the HTML as `logo.png`.
-    // Small enough that rewriting it on every open is negligible.
     let logo_path = dir.join("logo.png");
     std::fs::write(&logo_path, LOGO_PNG).ok()?;
 
-    // Version- and time-tagged HTML, so the browser always sees a
-    // fresh URL and any edit to `manual.html` is picked up on the
-    // next open without a version bump.
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -79,78 +111,48 @@ fn write_manual_to_disk() -> Option<PathBuf> {
     Some(path)
 }
 
-/// Returns `<config>/PEJVAK RVB/`, creating it if necessary.
+/// Returns `<temp>/PEJVAK RVB/`, creating it if necessary.
 ///
-/// Follows each platform's convention:
-///   Windows: `%APPDATA%\PEJVAK RVB\`
-///   macOS:   `~/Library/Application Support/PEJVAK RVB/`
-///   Linux:   `~/.config/PEJVAK RVB/`
+/// Uses `%TEMP%` (or the platform equivalent), not `%APPDATA%`:
+///
+///   * `%APPDATA%` may be a roaming profile on a dead network share
+///   * OneDrive sometimes redirects `%APPDATA%` to cloud storage,
+///     where file writes take seconds
+///   * AV often scans profile folders far more aggressively than
+///     `%TEMP%`, because profile files persist across sessions
+///
+/// The manual is a transient file. `%TEMP%` is the right place.
 fn manual_dir() -> Option<PathBuf> {
-    // Follow each platform's own convention:
-    //   Windows: %APPDATA%\PEJVAK RVB\
-    //   macOS:   ~/Library/Application Support/PEJVAK RVB/
-    //   Linux:   ~/.config/PEJVAK RVB/
-    let mut dir = if cfg!(windows) {
-        PathBuf::from(std::env::var("APPDATA").ok()?)
-    } else if cfg!(target_os = "macos") {
-        PathBuf::from(std::env::var("HOME").ok()?)
-            .join("Library")
-            .join("Application Support")
-    } else {
-        PathBuf::from(std::env::var("HOME").ok()?).join(".config")
-    };
+    let mut dir = std::env::temp_dir();
     dir.push("PEJVAK RVB");
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir)
 }
 
-/// Opens `path` with the OS's default handler.
+// ============================================================================
+// Per-platform browser open — process spawn only
+// ============================================================================
+
 #[cfg(target_os = "windows")]
-fn open_path(path: &std::path::Path) {
-    // Use ShellExecuteW directly instead of `cmd /c start`.
-    //
-    // The previous implementation called:
-    //     Command::new("cmd").args(["/c", "start", "", path_str])
-    //
-    // `cmd.exe` parses the entire command line for metacharacters
-    // (`&`, `|`, `^`, `>`, `<`, `%`, `!`) BEFORE `start` ever sees
-    // them. A path containing any of those — e.g., a Windows
-    // username with `&` in it, or a plugin installed under
-    // `C:\Program Files & Data\` — would be interpreted as a
-    // separate command and executed. This is a local command
-    // injection vulnerability.
-    //
-    // ShellExecuteW takes a wide (UTF-16) string directly and does
-    // NOT go through the shell, so no metacharacter interpretation
-    // can happen.
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::UI::Shell::ShellExecuteW;
-    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-
-    let wide: Vec<u16> = path
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-
-    unsafe {
-        ShellExecuteW(
-            std::ptr::null_mut(),
-            std::ptr::null(),
-            wide.as_ptr(),
-            std::ptr::null(),
-            std::ptr::null(),
-            SW_SHOWNORMAL,
-        );
-    }
+fn open_path(path: &Path) {
+    // `explorer.exe <path>` is a plain process spawn. The shell
+    // dispatch happens inside explorer's own process, so no COM or
+    // STA state from the plugin's thread is involved. This avoids
+    // the `ShellExecuteW` deadlock that can occur when a VST DLL
+    // calls it from a thread the DAW owns.
+    let _ = std::process::Command::new("explorer").arg(path).spawn();
 }
 
 #[cfg(target_os = "macos")]
-fn open_path(path: &std::path::Path) {
-    let _ = std::process::Command::new("open").arg(path).spawn();
+fn open_path(path: &Path) {
+    if let Ok(mut child) = std::process::Command::new("open").arg(path).spawn() {
+        let _ = child.wait();
+    }
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-fn open_path(path: &std::path::Path) {
-    let _ = std::process::Command::new("xdg-open").arg(path).spawn();
+fn open_path(path: &Path) {
+    if let Ok(mut child) = std::process::Command::new("xdg-open").arg(path).spawn() {
+        let _ = child.wait();
+    }
 }

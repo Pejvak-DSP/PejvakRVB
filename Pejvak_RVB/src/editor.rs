@@ -2875,7 +2875,12 @@ fn menu_button(ui: &mut Ui, t: &Theme, scale: f32, p: &Arc<PejvakRvbParams>) {
         let now = ui.input(|i| i.time);
         match idx {
             0 => {
-                crate::manual::open_in_browser();
+                ui.memory_mut(|m| {
+                    m.data.insert_temp(
+                        egui::Id::new("pejvak_manual_open_pending"),
+                        true,
+                    );
+                });
             }
             2 => {
                 ui.memory_mut(|m| {
@@ -2885,9 +2890,6 @@ fn menu_button(ui: &mut Ui, t: &Theme, scale: f32, p: &Arc<PejvakRvbParams>) {
                 });
             }
             3 => {
-                // Check for updates — request a check by writing a
-                // one-shot flag into egui memory. The actual work
-                // happens in `ui()` where `self` is available.
                 ui.memory_mut(|m| {
                     m.data
                         .insert_temp(egui::Id::new("pejvak_check_updates_requested"), true);
@@ -2996,6 +2998,7 @@ impl NiceEguiApp for PejvakEguiApp {
             vec!["Monoton".to_owned()],
         );
         egui_ctx.set_fonts(fonts);
+        crate::manual::init();
         Ok(())
     }
 
@@ -3038,6 +3041,27 @@ impl NiceEguiApp for PejvakEguiApp {
                     ));
             });
             self.start_update_download(ui.ctx().clone(), version, url, name, digest);
+        }
+
+        // ---- Deferred manual open -----------------------------------
+        // The menu click handler only sets a flag; the actual call
+        // happens here, at the top of a fresh frame, outside any
+        // click handler. This guarantees the menu closes even if
+        // open_in_browser() blocks (a slow filesystem, AV scanning
+        // the worker thread, or a shell API deadlock on a
+        // MOTW-flagged build).
+        let manual_pending = ui
+            .memory(|m| {
+                m.data
+                    .get_temp::<bool>(egui::Id::new("pejvak_manual_open_pending"))
+            })
+            .unwrap_or(false);
+        if manual_pending {
+            ui.memory_mut(|m| {
+                m.data
+                    .remove::<bool>(egui::Id::new("pejvak_manual_open_pending"));
+            });
+            crate::manual::open_in_browser();
         }
 
         // Host-driven disable state. The DAW calls `deactivate()` on
