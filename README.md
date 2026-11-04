@@ -7,7 +7,7 @@
 
 **A Professional Hybrid Algorithmic Reverb — Dual Engine. Pure Rust.**
 
-[![Version](https://img.shields.io/badge/version-1.1.0-blue?style=for-the-badge&logo=github)](https://github.com/Pejvak-DSP/PejvakRVB/releases)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue?style=for-the-badge&logo=github)](https://github.com/Pejvak-DSP/PejvakRVB/releases)
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-success?style=for-the-badge)](LICENSE)
 [![Rust](https://img.shields.io/badge/Built_with-Rust_🦀-orange?style=for-the-badge&logo=rust)](https://www.rust-lang.org)
 [![Platforms](https://img.shields.io/badge/Platforms-Windows_%7C_macOS_%7C_Linux-lightgrey?style=for-the-badge)](https://github.com/Pejvak-DSP/PejvakRVB/releases)
@@ -49,9 +49,18 @@ Switch seamlessly between two distinct worlds of reverb:
 | Engine | Character | Highlights |
 | :--- | :--- | :--- |
 | **☁️ CloudSeed** | Warm, dense, and deep | Faithful port of [Valdemar Erlingsson's *CloudSeed* (legacy-v1)](https://github.com/ValdemarOrn/CloudSeed/tree/legacy-v1). 49 parameters, deep early-diffusion front-end, and Velvet-Noise diffusion. |
-| **🌐 FFDN** | Clean, modern, and characterful | Filtered Feedback Delay Network. Features Householder & Velvet matrices, frequency-dependent attenuation, loop HP/LP filtering, mid-focus, modulated delay lines, Velvet saturation, spectral tilt, early reflections, and 3 dynamics stages (Attack / Ducking / Gate). |
+| **🌐 FFDN** | Clean, modern, and characterful | Filtered Feedback Delay Network. Features Householder & Velvet matrices, **Time-Varying Matrix** (with sine-wave LFO), frequency-dependent attenuation, loop HP/LP filtering, mid-focus, modulated delay lines, Velvet saturation, spectral tilt, early reflections, and 3 dynamics stages (Attack / Ducking / Gate). |
 
 *Switching engines instantly clears the departing engine's buffers, ensuring zero bleed-over from stale tails.*
+
+### 🌀 Time-Varying Feedback Matrix
+
+The FFDN engine's feedback matrix can be **slowly rotated** via a continuous sine-wave LFO, controlled by two dedicated knobs on the MODULATION card:
+
+- **Matrix Amt** (0..1) — depth of the Givens rotation applied to pairs of delay lines. At 0, the matrix is static (bit-identical to the previous version).
+- **Matrix Rate** (0.01..2.0 Hz) — speed of rotation.
+
+The LFO uses a **continuous sine wave** rather than a sawtooth, and the rotation is applied in-place with pre-computed `sin/cos` pairs. This eliminates the metallic clicks and zipper noise that a naive sawtooth-driven matrix would produce, while still delivering a lush, evolving tail on long decays. Both parameters are disabled when the MODULATION card's master switch is off.
 
 ### 🎨 Texture Rack (6 Layers)
 
@@ -88,11 +97,12 @@ The `wide` crate maps these operations to the widest vector instructions enabled
 - ↩️ **Undo / Redo:** 50 steps with parameter-name tooltips. Undo never cuts the reverb tail.
 - 🛑 **TX Kill Switch:** One-click master switch for all six texture layers and ILLUSION.
 - 🎛️ **100 Factory Presets** across 16 color-coded categories.
-- 🎨 **Dark / Light theme**, resizable UI (70% – 200%).
+- 🎨 **Dark / Light theme**, resizable UI (70% – 300%) with native aspect-ratio locking.
+- ⌨️ **DAW Shortcut Forwarding:** Use DAW shortcuts (Space, Numpad, etc.) directly from the plugin window without focus loss.
 - 📖 **Bundled HTML Manual** with a sticky header, live search, and print-to-PDF support.
 - 🔄 **Check for Updates:** Built-in update checker with SHA-256 verified downloads.
-- 💾 **Full State Persistence:** Preset name, texture chain order, theme, window size, and UI preferences all survive a host reload.
-- 🧹 **Clippy-clean, bit-identical DSP:** Every output-stage gain is per-sample smoothed, neutral settings are covered by `*_is_bit_identical` tests, and **49 tests** (42 DSP + 7 plugin) pass on every release.
+- 💾 **Full State Persistence:** Preset name, texture chain order, theme, global window size, and UI preferences all survive a host reload.
+- 🧹 **Clippy-clean, bit-identical DSP:** Every output-stage gain is per-sample smoothed, neutral settings are covered by `*_is_bit_identical` tests, and **54 tests** (42 DSP + 12 plugin) pass on every release.
 
 ---
 
@@ -139,7 +149,7 @@ The **Check for Updates** menu option is designed to be safe by default:
 <div align="center">
   <img src="screenshots/ffdn.png" alt="FFDN Engine" width="800"/>
   <br>
-  <i>FFDN Engine — Modern and Characterful</i>
+  <i>FFDN Engine — Modern and Characterful (incl. Time-Varying Matrix)</i>
 </div>
 
 <br>
@@ -194,7 +204,7 @@ cp Pejvak_RVB.clap ~/.clap/
 
 ### 🔄 Updating
 
-Once installed, use the **☰ menu → Check for updates** option inside the plugin. It will:
+Once installed, use the ☰ menu → **Check for updates** option inside the plugin. It will:
 
 1. Query the GitHub Releases API and compare the remote tag against the installed version.
 2. Show the release notes for any newer version.
@@ -206,7 +216,8 @@ Once installed, use the **☰ menu → Check for updates** option inside the plu
 ## 🛠️ Building from Source
 
 Ensure you have **Rust 1.98+** installed.
-(Linux users also need X11 and OpenGL development libraries — see [CONTRIBUTING.md](CONTRIBUTING.md#development-setup).)
+
+> Linux users also need X11 and OpenGL development libraries — see `CONTRIBUTING.md`.
 
 ```bash
 git clone https://github.com/Pejvak-DSP/PejvakRVB.git
@@ -224,7 +235,7 @@ The DSP suite is bit-identical by design — every neutral/default value is cove
 # 42 DSP tests, all passing
 cargo test -p fdn_reverb_core
 
-# 7 plugin tests (XML parser + parameter handling)
+# 12 plugin tests (XML parser, parameter handling, updater, string parsing)
 cargo test -p Pejvak_RVB
 
 # zero warnings across both crates, including tests
@@ -245,7 +256,7 @@ lipo -create \
   -output target/universal/release/libPejvak_RVB.dylib
 ```
 
-The full release pipeline (all three platforms, plus the Windows `.exe` and macOS `.pkg` installers) is defined in [`.github/workflows/release.yml`](.github/workflows/release.yml).
+The full release pipeline (all three platforms, plus the Windows `.exe` and macOS `.pkg` installers) is defined in `.github/workflows/release.yml`.
 
 ---
 
@@ -257,15 +268,24 @@ PejvakRVB/
 │   └── src/
 │       ├── cloudseed/      ← Faithful CloudSeed port
 │       ├── ffdn/           ← Filtered Feedback Delay Network
+│       │   └── mod.rs      ← Time-Varying Matrix (sine LFO + Givens rotation)
 │       └── texture/        ← Six texture layers + ILLUSION
 ├── Pejvak_RVB/             ← Plugin wrapper (params, UI, presets)
+│   ├── fonts/
 │   └── src/
 │       ├── lib.rs          ← Plugin definition & audio thread
-│       ├── editor.rs       ← egui interface
+│       ├── editor/         ← Modular egui interface
+│       │   ├── mod.rs      ← Root, window resizing, keyboard forwarding
+│       │   ├── header.rs   ← Menus, tabs, toggles
+│       │   ├── pages.rs    ← MAIN and TEXTURE page layouts
+│       │   ├── widgets.rs  ← Knobs, faders, custom UI components
+│       │   ├── theme.rs    ← Dark/Light theme definitions
+│       │   ├── xml.rs      ← Preset saving/loading & state snapshots
+│       │   ├── presets_ui.rs ← Preset browser menu
+│       │   └── overlay.rs  ← About modal, update modal, disabled overlay
 │       ├── updater.rs      ← GitHub release checker
 │       ├── manual.rs       ← HTML manual loader
 │       └── presets.rs      ← 100 factory presets
-├── egui-baseview-0.7.2/    ← Vendored + patched baseview backend
 ├── manual/                 ← Bundled HTML manual + logo
 ├── screenshots/            ← README images
 ├── .github/workflows/      ← Release CI (release.yml)
@@ -279,7 +299,7 @@ PejvakRVB/
 
 ## 🤝 Contributing
 
-Bug reports, feature requests, and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) first — the real-time safety and DSP rules there are strict. See [CHANGELOG.md](CHANGELOG.md) for release history.
+Bug reports, feature requests, and pull requests are welcome. Please read `CONTRIBUTING.md` first — the real-time safety and DSP rules there are strict. See `CHANGELOG.md` for release history.
 
 ---
 
@@ -287,29 +307,29 @@ Bug reports, feature requests, and pull requests are welcome. Please read [CONTR
 
 PEJVAK RVB stands on the shoulders of giants. Huge thanks to:
 
-- **CloudSeed** — [Valdemar Erlingsson](https://github.com/ValdemarOrn/CloudSeed/tree/legacy-v1) (the original reference implementation)
-- **CloudReverb** — [xunil-cloud](https://github.com/xunil-cloud/CloudReverb) (JUCE fork & modern parameter layout)
+- **CloudSeed** — Valdemar Erlingsson (the original reference implementation)
+- **CloudReverb** — xunil-cloud (JUCE fork & modern parameter layout)
 - **FFDN Theory** — Fagerström et al., "Velvet-Noise Feedback Delay Network" (DAFx 2020); Schlecht & Habets (IEEE TSP 2017); Välimäki et al. (IEEE/ACM TASLP 2017)
+- **Time-Varying Matrix** — Givens rotation technique, standard in modern FDN implementations (Valhalla, Cinematic Rooms, Tai Chi)
 - **Granular Design** — Curtis Roads, *Microsound* (MIT Press, 2001)
 
-Built with Rust, `nice-plug`, `egui`, `wide`, and `ureq`.
+Built with Rust, nice-plug, egui, wide, and ureq.
 
 ---
 
 ## 📄 License
 
-This project is licensed under the **GNU General Public License v3.0 or later**.
+This project is licensed under the GNU General Public License v3.0 or later.
 
 ```text
 Copyright (C) 2026 Pejvak DSP
 Author: Amin Yousefinejad
+See the LICENSE file for the full text.
 ```
-
-See the [LICENSE](LICENSE) file for the full text.
 
 <div align="center">
 
-**Pejvak DSP** · Designed & developed by **Amin Yousefinejad**
+Pejvak DSP · Designed & developed by Amin Yousefinejad
 
 <i>Made with ♥ for the audio community.</i>
 

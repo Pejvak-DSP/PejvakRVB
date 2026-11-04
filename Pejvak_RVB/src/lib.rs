@@ -29,8 +29,7 @@ use fdn_reverb_core::cloudseed::{
     DEFAULT_PARAMS, PARAM_COUNT,
 };
 use nice_plug::prelude::*;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 #[cfg(feature = "gui-egui")]
@@ -95,68 +94,6 @@ const _: () = assert!(
 /// Default texture-chain order, packed one byte per slot:
 /// `[0, 1, 2, 3, 4, 5]` = Shimmer → Mist → Drift → Crystal → Scatter → Bloom.
 const DEFAULT_TEXTURE_ORDER_PACKED: u64 = 0x0000_0504_0302_0100;
-
-// ============================================================================
-// File-based user settings (default editor size)
-// ============================================================================
-//
-// We persist the user's preferred editor size to a small text file in
-// the OS-specific per-user config directory. This is intentionally
-// separate from the plugin's `#[persist]` state, because the plugin
-// state lives inside the host's project / preset data and is lost
-// when the user removes and re-adds the plugin instance. A file on
-// disk survives plugin removal and is available to any future
-// instance of the plugin on the same machine.
-
-/// Path to the user settings file, creating the containing directory
-/// if needed. Returns `None` if the OS doesn't expose a per-user
-/// config directory or if directory creation fails.
-fn settings_path() -> Option<PathBuf> {
-    let base = if cfg!(windows) {
-        std::env::var("APPDATA").ok()
-    } else {
-        std::env::var("HOME").ok()
-    };
-    let mut dir = PathBuf::from(base?);
-    dir.push("PEJVAK RVB");
-    std::fs::create_dir_all(&dir).ok()?;
-    dir.push("settings.txt");
-    Some(dir)
-}
-
-/// Reads `default_width` and `default_height` from the settings file.
-/// Returns `(0, 0)` if the file doesn't exist or is malformed, which
-/// the caller interprets as "use the factory default size".
-fn load_default_size() -> (u32, u32) {
-    let path = match settings_path() {
-        Some(p) => p,
-        None => return (0, 0),
-    };
-    let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return (0, 0),
-    };
-    let mut w = 0u32;
-    let mut h = 0u32;
-    for line in content.lines() {
-        if let Some(v) = line.strip_prefix("default_width=") {
-            w = v.trim().parse().unwrap_or(0);
-        } else if let Some(v) = line.strip_prefix("default_height=") {
-            h = v.trim().parse().unwrap_or(0);
-        }
-    }
-    (w, h)
-}
-
-/// Writes `default_width` and `default_height` to the settings file.
-/// Silently ignores I/O errors — a failed write is not fatal, the
-/// user simply won't get the new default on the next plugin launch.
-pub fn save_default_size(w: u32, h: u32) {
-    if let Some(path) = settings_path() {
-        let content = format!("default_width={}\ndefault_height={}\n", w, h);
-        let _ = std::fs::write(&path, content);
-    }
-}
 
 // ============================================================================
 // Smart Idle (matches C++ `AudioPluginAudioProcessor::processBlock`)
@@ -451,10 +388,19 @@ fn parse_parameter(index: usize, s: &str) -> Option<f32> {
         10f64.powf(val / 20.0)
     } else if t.contains('%') || (is_pct && val > 1.0) {
         val / 100.0
-    } else if index == line_decay
-        && (t.contains("ms") || (!t.contains('s') && val > 1.0 && val < 1000.0))
-    {
-        val / 1000.0
+    } else if index == line_decay {
+        if t.contains("ms") {
+            val / 1000.0
+        } else if t.contains('s') {
+            val
+        } else {
+            // Bare numbers: >= 60 are milliseconds, < 60 are seconds
+            if val >= 60.0 {
+                val / 1000.0
+            } else {
+                val
+            }
+        }
     } else {
         val
     };
@@ -1747,6 +1693,12 @@ pub struct FfdnParams {
     #[id = "FfdnGate"]
     pub gate: FloatParam,
 
+    #[id = "FfdnMatrixMod"]
+    pub matrix_mod: FloatParam,
+
+    #[id = "FfdnMatrixRate"]
+    pub matrix_rate: FloatParam,
+
     // ============================================================
     // FFDN CARD MASTER ENABLES
     // ============================================================
@@ -1994,6 +1946,22 @@ impl Default for FfdnParams {
                 .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
                 .with_string_to_value(percent_parser()),
 
+            matrix_mod: FloatParam::new(
+                "FfdnMatrixMod",
+                0.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_value_to_string(Arc::new(|v| format!("{:.0} %", v * 100.0)))
+            .with_string_to_value(percent_parser()),
+
+            matrix_rate: FloatParam::new(
+                "FfdnMatrixRate",
+                0.5,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_value_to_string(Arc::new(|v| format!("{:.2} Hz", 0.01 + v * 1.99)))
+            .with_string_to_value(linear_parser(0.01, 1.99)),
+
             space_enabled: BoolParam::new("FfdnSpaceEnabled", true),
             network_enabled: BoolParam::new("FfdnNetworkEnabled", true),
             character_enabled: BoolParam::new("FfdnCharacterEnabled", true),
@@ -2105,42 +2073,38 @@ pub struct PejvakRvbParams {
     #[persist = "show_popups"]
     pub show_popups: Arc<AtomicBool>,
 
-    /// Name of the currently-loaded preset, persisted with the
-    /// plugin state so the label survives a close/reopen of the
-    /// editor and a session reload.
-    ///
-    /// Using `Arc<Mutex<String>>` (rather than an atomic) because
-    /// nice-plug's `#[persist]` requires interior mutability and
-    /// `String` has no atomic form.
     #[cfg(feature = "gui-egui")]
     #[persist = "current_preset"]
     pub current_preset: Arc<std::sync::Mutex<String>>,
 
     #[cfg(feature = "gui-egui")]
-    pub default_width: Arc<AtomicU32>,
-    #[cfg(feature = "gui-egui")]
-    pub default_height: Arc<AtomicU32>,
-
-    /// `true` while the host has the plugin in its active state.
-    /// Set to `false` in `Plugin::deactivate()` and back to `true`
-    /// in `Plugin::activate()`. The editor polls this every frame
-    /// and draws a blocking "PLUGIN DISABLED" overlay while it is
-    /// `false`, so the user gets immediate visual confirmation that
-    /// the DAW has taken the plugin offline (and any parameter
-    /// edits they make won't be audible until it is re-enabled).
-    #[cfg(feature = "gui-egui")]
     pub plugin_active: Arc<AtomicBool>,
+
+    /// Persisted editor window size (width, height).
+    #[cfg(feature = "gui-egui")]
+    #[persist = "editor_size"]
+    pub editor_size: Arc<std::sync::Mutex<(u32, u32)>>,
 }
 
 impl Default for PejvakRvbParams {
     fn default() -> Self {
-        // Read the persisted default size from disk. This runs at
-        // plugin instantiation (not on the audio thread), so the
-        // file I/O is safe. If the file is missing, both values are
-        // 0 and the editor will use the factory default of
-        // `WINDOW_W × WINDOW_H`.
         #[cfg(feature = "gui-egui")]
-        let (dw, dh) = load_default_size();
+        let editor_size = {
+            // Read the global default size from the config file.
+            let mut size = (editor::WINDOW_W, editor::WINDOW_H);
+            if let Some(dir) = editor::xml::user_presets_dir() {
+                let path = dir.join("window_size.cfg");
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    let parts: Vec<&str> = content.split('x').collect();
+                    if parts.len() == 2 {
+                        if let (Ok(w), Ok(h)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+                            size = (w, h);
+                        }
+                    }
+                }
+            }
+            size
+        };
 
         Self {
             input: InputParams::default(),
@@ -2179,11 +2143,9 @@ impl Default for PejvakRvbParams {
             #[cfg(feature = "gui-egui")]
             current_preset: Arc::new(std::sync::Mutex::new("Init".to_string())),
             #[cfg(feature = "gui-egui")]
-            default_width: Arc::new(AtomicU32::new(dw)),
-            #[cfg(feature = "gui-egui")]
-            default_height: Arc::new(AtomicU32::new(dh)),
-            #[cfg(feature = "gui-egui")]
             plugin_active: Arc::new(AtomicBool::new(true)),
+            #[cfg(feature = "gui-egui")]
+            editor_size: Arc::new(std::sync::Mutex::new(editor_size)),
         }
     }
 }
@@ -2300,7 +2262,9 @@ pub struct PejvakRvbPlugin {
     ///   [27] attack
     ///   [28] ducking
     ///   [29] gate
-    last_ffdn: [f64; 30],
+    ///   [30] matrix_mod
+    ///   [31] matrix_rate
+    last_ffdn: [f64; 32],
     /// Cache of the last texture-order value actually pushed into the
     /// DSP core.
     last_order_packed: u64,
@@ -2330,7 +2294,7 @@ impl Default for PejvakRvbPlugin {
             last_tex: [f64::NAN; TEX_COUNT],
             last_order_packed: u64::MAX,
             last_illusion: [f64::NAN; 8],
-            last_ffdn: [f64::NAN; 30],
+            last_ffdn: [f64::NAN; 32],
             panic_strikes: 0,
             engine_dead: false,
         }
@@ -2360,7 +2324,7 @@ impl Plugin for PejvakRvbPlugin {
     type BackgroundTask = ();
 
     #[cfg(feature = "gui-egui")]
-    type Editor = nice_plug_egui::EguiEditor<editor::PejvakEguiApp>;
+    type Editor = editor::PejvakEditor;
 
     #[cfg(not(feature = "gui-egui"))]
     type Editor = ();
@@ -2394,7 +2358,7 @@ impl Plugin for PejvakRvbPlugin {
         self.params.plugin_active.store(true, Ordering::Relaxed);
 
         #[cfg(feature = "gui-egui")]
-         crate::manual::init();
+        crate::manual::init();
 
         let ctrl = ReverbController::new(buffer_config.sample_rate as i32);
         self.engine = Some(ctrl);
@@ -2404,7 +2368,7 @@ impl Plugin for PejvakRvbPlugin {
         self.last_order_packed = u64::MAX;
 
         self.last_illusion = [f64::NAN; 8];
-        self.last_ffdn = [f64::NAN; 30];
+        self.last_ffdn = [f64::NAN; 32];
 
         true
     }
@@ -2473,7 +2437,7 @@ impl Plugin for PejvakRvbPlugin {
                 self.last_tex = [f64::NAN; TEX_COUNT];
                 self.last_order_packed = u64::MAX;
                 self.last_illusion = [f64::NAN; 8];
-                self.last_ffdn = [f64::NAN; 30];
+                self.last_ffdn = [f64::NAN; 32];
                 self.idle = TailIdle::new();
                 if self.panic_strikes >= 2 {
                     self.engine_dead = true;
@@ -2516,7 +2480,7 @@ impl PejvakRvbPlugin {
             self.last_pushed = [f64::NAN; PARAM_COUNT];
             self.last_tex = [f64::NAN; TEX_COUNT];
             self.last_illusion = [f64::NAN; 8];
-            self.last_ffdn = [f64::NAN; 30];
+            self.last_ffdn = [f64::NAN; 32];
             self.idle = TailIdle::new();
         }
 
@@ -2558,25 +2522,14 @@ impl PejvakRvbPlugin {
         }
 
         // ---- Wake-transition cache invalidation ----------------------
-        // When the plugin wakes up from sleep, invalidate the
-        // parameter caches so that every parameter is re-pushed on
-        // this block, exactly as if the plugin had just been
-        // activated. This guards against the case where the host
-        // changes a parameter while the plugin is asleep: the audio
-        // thread never sees the change (because `process_inner`
-        // returns early), so `last_pushed` / `last_tex` would
-        // otherwise still hold the pre-sleep values and the next
-        // push loop would skip the update.
         if self.idle.did_wake() {
             self.last_pushed = [f64::NAN; PARAM_COUNT];
             self.last_tex = [f64::NAN; TEX_COUNT];
+            self.last_illusion = [f64::NAN; 8];
+            self.last_ffdn = [f64::NAN; 32];
         }
 
-        // Master EQ switch: when disabled, force the three per-stage
-        // enables (indices 44, 45, 46) to zero. The user's stored
-        // values are preserved in the parameter set, so turning the
-        // master back on restores their selection — the parameter
-        // cache (`last_pushed`) will see the difference and re-push.
+        // Master EQ switch
         let eq_off = !self.params.eq.enabled.value();
 
         for i in 0..PARAM_COUNT {
@@ -3006,10 +2959,7 @@ impl PejvakRvbPlugin {
                     self.params.ffdn.er_level.value() as f64,
                     self.params.ffdn.drive_enabled.value(),
                     self.params.ffdn.tilt_enabled.value(),
-                    // ER is always on when CHARACTER is on. Its level
-                    // is controlled by the MIXER's ER fader; the old
-                    // per-stage switch was removed.
-                    true,
+                    self.params.ffdn.er_enabled.value(),
                 )
             } else {
                 (0.0, 0.0, 1000.0, 0.5, 0.0, false, false, false)
@@ -3140,6 +3090,24 @@ impl PejvakRvbPlugin {
         if gate != self.last_ffdn[29] {
             ctrl.set_ffdn_gate(gate);
             self.last_ffdn[29] = gate;
+        }
+
+        // ---- TV-FDN Matrix Modulation ----
+        let mat_mod = if modulation_on {
+            self.params.ffdn.matrix_mod.value() as f64
+        } else {
+            0.0
+        };
+        let mat_rate = if modulation_on {
+            0.01 + self.params.ffdn.matrix_rate.value() as f64 * 1.99
+        } else {
+            0.5 // Neutral rate
+        };
+
+        if mat_mod != self.last_ffdn[30] || mat_rate != self.last_ffdn[31] {
+            ctrl.set_ffdn_matrix_modulation(mat_mod, mat_rate);
+            self.last_ffdn[30] = mat_mod;
+            self.last_ffdn[31] = mat_rate;
         }
 
         // ---- process in blocks -----------------------------------------

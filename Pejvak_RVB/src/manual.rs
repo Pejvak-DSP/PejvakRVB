@@ -135,12 +135,21 @@ fn manual_dir() -> Option<PathBuf> {
 
 #[cfg(target_os = "windows")]
 fn open_path(path: &Path) {
-    // `explorer.exe <path>` is a plain process spawn. The shell
-    // dispatch happens inside explorer's own process, so no COM or
-    // STA state from the plugin's thread is involved. This avoids
-    // the `ShellExecuteW` deadlock that can occur when a VST DLL
-    // calls it from a thread the DAW owns.
-    let _ = std::process::Command::new("explorer").arg(path).spawn();
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            wide.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        );
+    }
 }
 
 #[cfg(target_os = "macos")]

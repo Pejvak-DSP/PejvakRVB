@@ -864,6 +864,10 @@ impl ReverbController {
         self.ffdn.set_er_enabled(enabled);
     }
 
+    pub fn set_ffdn_matrix_modulation(&mut self, amount: f64, rate_hz: f64) {
+        self.ffdn.set_matrix_modulation(amount, rate_hz);
+    }
+
     // ============================================================
     // FFDN NETWORK / FILTER / DYNAMICS — pass-through
     // ============================================================

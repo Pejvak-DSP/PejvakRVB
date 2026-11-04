@@ -11,7 +11,7 @@
   --bg-3: #1c2540;
   --card: #161e36;
   --header-bg: rgba(10, 15, 30, 0.82);
-  --header-h: 180px;  /* updated at runtime by JS */
+  --header-h: 180px;
   --fg: #e6eaf4;
   --fg-2: #8d97b0;
   --fg-3: #5e6882;
@@ -62,7 +62,6 @@ body {
   margin: 0 auto;
   min-height: 100vh;
 }
-/* ---- Sidebar ---- */
 aside {
   position: sticky;
   top: 0;
@@ -120,7 +119,6 @@ nav a.active {
   border-left-color: var(--accent);
 }
 nav a.sub { padding-left: 28px; font-size: 12.5px; }
-/* ---- Main ---- */
 main { padding: 0 64px 120px; max-width: 900px; }
 
 header.top {
@@ -237,7 +235,6 @@ h1 {
   margin-left: 8px;
   align-self: center;
 }
-/* ---- Sections ---- */
 section {
   margin-bottom: 56px;
   scroll-margin-top: calc(var(--header-h) + 16px);
@@ -290,7 +287,6 @@ kbd {
   min-width: 20px;
   text-align: center;
 }
-/* ---- Cards ---- */
 .card {
   background: var(--card);
   border: 1px solid var(--border);
@@ -306,7 +302,6 @@ kbd {
   color: var(--accent);
   margin-bottom: 12px;
 }
-/* ---- Callouts ---- */
 .note, .tip, .warn {
   border-left: 3px solid;
   padding: 12px 16px;
@@ -320,7 +315,6 @@ kbd {
 .note::before { content: 'ℹ  '; color: var(--accent-2); font-weight: 700; }
 .tip::before { content: '★  '; color: var(--ok); font-weight: 700; }
 .warn::before { content: '⚠  '; color: var(--warn); font-weight: 700; }
-/* ---- Tables ---- */
 table {
   width: 100%;
   border-collapse: collapse;
@@ -342,7 +336,6 @@ th {
 td { color: var(--fg-2); }
 td:first-child { color: var(--fg); font-weight: 500; }
 tr:last-child td { border-bottom: none; }
-/* ---- Layout diagrams ---- */
 .diagram {
   font-family: var(--mono);
   font-size: 12px;
@@ -355,8 +348,6 @@ tr:last-child td { border-bottom: none; }
   color: var(--fg-2);
   white-space: pre;
 }
-
-/* ---- Keyboard list ---- */
 .keys { list-style: none; padding: 0; }
 .keys li {
   display: flex;
@@ -367,7 +358,6 @@ tr:last-child td { border-bottom: none; }
 .keys li:last-child { border-bottom: none; }
 .keys .key { flex: 0 0 140px; color: var(--fg); }
 .keys .desc { color: var(--fg-2); }
-/* ---- Search highlight ---- */
 mark.hit {
   background: rgba(255, 140, 66, 0.55);
   color: inherit;
@@ -380,8 +370,6 @@ mark.hit.current {
   color: var(--bg);
   box-shadow: 0 0 0 2px var(--warn);
 }
-
-/* ---- Back to top button ---- */
 #backToTop {
   position: fixed;
   bottom: 32px;
@@ -416,8 +404,6 @@ mark.hit.current {
   transform: translateY(-2px);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
 }
-
-/* ---- Responsive ---- */
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
   aside {
@@ -432,7 +418,6 @@ mark.hit.current {
   header.top { margin: 0 -20px 32px -20px; padding: 24px 20px 16px 20px; }
   #backToTop { bottom: 20px; right: 20px; }
 }
-/* ---- Print ---- */
 @media print {
   aside, .toolbar, nav, #backToTop { display: none !important; }
   .layout { display: block; }
@@ -453,7 +438,7 @@ mark.hit.current {
   <div class="brand">
     <img src="logo.png" alt="PEJVAK DSP" class="brand-logo">
     PEJVAK RVB
-    <small>User Manual · v1.1.0</small>
+    <small>User Manual · v1.2.0</small>
   </div>
   <nav id="toc">
     <a href="#intro">1. Introduction</a>
@@ -483,6 +468,7 @@ mark.hit.current {
     <a href="#ffdn-character" class="sub">6.3 CHARACTER</a>
     <a href="#ffdn-shelves" class="sub">6.4 SHELVES</a>
     <a href="#ffdn-modulation" class="sub">6.5 MODULATION</a>
+    <a href="#ffdn-tvmatrix" class="sub">6.5b TIME-VARYING MATRIX</a>
     <a href="#ffdn-filter" class="sub">6.6 FILTER</a>
     <a href="#ffdn-dynamics" class="sub">6.7 DYNAMICS</a>
     <a href="#texture">7. Texture Rack</a>
@@ -507,7 +493,7 @@ mark.hit.current {
 
 <header class="top">
   <h1>PEJVAK RVB</h1>
-  <div class="meta">Hybrid Algorithmic Reverb · Version 1.1.0 · GPL-3.0-or-later</div>
+  <div class="meta">Hybrid Algorithmic Reverb · Version 1.2.0 · GPL-3.0-or-later</div>
   <div class="toolbar">
     <div class="search-wrap">
       <input id="search" type="text" placeholder="Search the manual…" autocomplete="off"
@@ -536,7 +522,7 @@ mark.hit.current {
 
 <div class="card">
 <div class="card-title">FFDN Engine</div>
-<p>A modern Filtered Feedback Delay Network based on Fagerström (DAFx 2020) and Schlecht (IEEE TSP 2017). It reaches comparable echo density with a cleaner signal path, and exposes character controls — cross-feed, Velvet saturation, spectral tilt, and three dynamics stages — that the CloudSeed engine does not have.</p>
+<p>A modern Filtered Feedback Delay Network based on Fagerström (DAFx 2020) and Schlecht (IEEE TSP 2017). It reaches comparable echo density with a cleaner signal path, and exposes character controls — cross-feed, Velvet saturation, spectral tilt, three dynamics stages, and a <strong>Time-Varying Feedback Matrix</strong> — that the CloudSeed engine does not have.</p>
 </div>
 
 <h3>On top of the two engines</h3>
@@ -560,9 +546,9 @@ mark.hit.current {
 <ol>
   <li>Removes the Windows security block (<em>Mark of the Web</em>) from the bundled plugin files.</li>
   <li>Creates the VST3 and CLAP system directories if they do not exist.</li>
-  <li>Copies <code>PEJVAK RVB.vst3</code> and <code>Pejvak_RVB.clap</code> into their respective folders:
-    <div class="diagram">C:\Program Files\Common Files\VST3\PEJVAK RVB\
-C:\Program Files\Common Files\CLAP\</div>
+  <li>Copies the VST3 bundle and the CLAP plugin into their respective folders:
+    <div class="diagram">C:\Program Files\Common Files\VST3\Pejvak_RVB.vst3\
+C:\Program Files\Common Files\CLAP\Pejvak_RVB.clap</div>
   </li>
   <li>Pauses for confirmation once installation completes.</li>
 </ol>
@@ -575,28 +561,48 @@ guarantees integrity even without code signing. The SmartScreen warning
 will disappear once the installer receives a code-signing certificate.
 </div>
 
+<p>A <strong>portable ZIP</strong> (<code>PEJVAK-RVB-windows-x64-portable.zip</code>) is also published for users without administrator rights. Extract it and copy the two files manually — the bundled <code>README.txt</code> documents the exact paths.</p>
+
 <h3>macOS (Universal Binary)</h3>
 <p>Download and double-click <code>PEJVAK-RVB-macos-universal.pkg</code>. This is a standard Apple package installer that:</p>
 <ol>
-  <li>Installs the VST3 and CLAP bundles into <code>~/Library/Audio/Plug-Ins/</code>.</li>
-  <li>Removes the Gatekeeper quarantine attribute from both plugins.</li>
+  <li>Installs the VST3 and CLAP bundles into the <strong>system-wide</strong> plug-in folders:
+    <div class="diagram">/Library/Audio/Plug-Ins/VST3/Pejvak_RVB.vst3
+/Library/Audio/Plug-Ins/CLAP/Pejvak_RVB.clap</div>
+    The macOS installer prompts for administrator credentials.
+  </li>
+  <li>The bundles are ad-hoc codesigned after <code>lipo</code> and <code>strip</code>, so Apple Silicon and Intel Macs can both load them without a developer certificate.</li>
 </ol>
 <p>The package is <strong>universal</strong> — it runs natively on both Apple Silicon (M1/M2/M3/M4) and Intel Macs. No Rosetta required.</p>
 
 <div class="note">
-If macOS still blocks the plugin the first time you load it in your DAW:
-<strong>System Settings → Privacy &amp; Security → "Open Anyway"</strong>.
-This is only necessary once, and only when the package has not been
-notarized. The PKG installer already removes the quarantine attribute,
-so in most cases you will not see this dialog at all.
+Prefer a per-user install (in <code>~/Library/Audio/Plug-Ins/</code>) or
+do not want to enter an admin password? Download
+<code>PEJVAK-RVB-macos-universal-portable.zip</code> instead and copy
+the two bundles manually — the included <code>README.txt</code>
+documents the exact paths and how to strip the Gatekeeper quarantine
+flag.
+</div>
+
+<div class="note">
+If macOS still blocks the plugin the first time you load it in your DAW
+after a manual ZIP install: <strong>System Settings → Privacy &amp;
+Security → "Open Anyway"</strong>. This is only necessary once. The
+PKG installer handles this automatically; the warning mainly concerns
+users of the portable ZIP.
 </div>
 
 <h3>Linux</h3>
-<p>Download <code>PEJVAK-RVB-linux-x64.tar.gz</code> and extract it. Then install manually:</p>
+<p>Two packages are published:</p>
+<ul>
+  <li><code>PEJVAK-RVB-linux-x64.deb</code> — for Debian / Ubuntu. Install with <code>sudo dpkg -i</code>.</li>
+  <li><code>PEJVAK-RVB-linux-x64.tar.gz</code> — portable archive. Extract and copy the two bundles manually.</li>
+</ul>
+<p>Manual install from the tarball:</p>
 <div class="diagram"># VST3
-mkdir -p ~/.vst3/"PEJVAK RVB.vst3"/Contents/x86_64-linux
-cp "PEJVAK RVB.vst3/Contents/x86_64-linux/PEJVAK RVB.so" \
-   ~/.vst3/"PEJVAK RVB.vst3"/Contents/x86_64-linux/
+mkdir -p ~/.vst3/Pejvak_RVB.vst3/Contents/x86_64-linux
+cp "Pejvak_RVB.vst3/Contents/x86_64-linux/Pejvak_RVB.so" \
+   ~/.vst3/Pejvak_RVB.vst3/Contents/x86_64-linux/
 
 # CLAP
 mkdir -p ~/.clap
@@ -677,8 +683,11 @@ cargo nice-plug bundle Pejvak_RVB --release</div>
 <div class="diagram"># 42 DSP tests
 cargo test -p fdn_reverb_core
 
-# 11 plugin tests (XML parser, parameter handling, updater)
-cargo test -p Pejvak_RVB</div>
+# 12 plugin tests (XML parser, parameter handling, updater, string parsing)
+cargo test -p Pejvak_RVB
+
+# 54 tests total
+</div>
 
 <div class="tip">
 The DSP core (<code>fdn_reverb_core</code>) has no OS-specific code, so
@@ -739,18 +748,33 @@ The fastest way to hear the difference between the two engines is to load the sa
   <tr><td>Interp</td><td>Enables delay-line interpolation (smoother modulation at a small CPU cost). CloudSeed only.</td></tr>
   <tr><td>↶ ↷</td><td>Undo / Redo. Hover shows which parameters the next action will affect. See <a href="#undo">§4.4</a>.</td></tr>
   <tr><td>Preset ▾</td><td>Opens the preset browser. The ◀ ▶ arrows step through presets without opening the list.</td></tr>
-  <tr><td>☰</td><td>Plugin menu — Manual, Size, About, Check for updates, Show pop-ups. See <a href="#menu">§4.2</a>.</td></tr>
+  <tr><td>☰</td><td>Plugin menu — Manual, Size, Check for updates, Show pop-ups, About. See <a href="#menu">§4.2</a>.</td></tr>
   <tr><td>☾ / ☀</td><td>Toggles the plugin theme between dark and light.</td></tr>
 </table>
 
+<div class="note">
+<strong>Keyboard forwarding.</strong> When the plugin window has focus,
+the standard DAW shortcuts — <kbd>Space</kbd> (Play/Stop),
+<kbd>Enter</kbd>, <kbd>Esc</kbd>, <kbd>Tab</kbd>, <kbd>Backspace</kbd>,
+<kbd>Home</kbd>, <kbd>End</kbd>, the arrow keys, the ten Numpad
+number keys, and the Numpad operators <kbd>+</kbd> <kbd>-</kbd>
+<kbd>*</kbd> <kbd>/</kbd> <kbd>.</kbd> <kbd>,</kbd> — are forwarded
+to the host as if you had pressed them in the DAW itself. This works
+in Reaper, Sonar/Cakewalk, Cubase, Studio One, Bitwig, and Ableton.
+A short "loop-prevention" guard ignores the host's echo of the same
+key for 50 ms so Reaper does not get stuck in a Play/Stop flicker
+when <kbd>Space</kbd> is pressed. While a parameter text field is
+being edited, forwarding is disabled so you can type freely.
+</div>
+
 <h3 id="menu">4.2 Menu ☰</h3>
-<p>Five items:</p>
+<p>Five items, listed top to bottom:</p>
 <ul>
   <li><strong>Manual</strong> — opens this document in your browser.</li>
-  <li><strong>Size</strong> — a hover flyout listing UI-scale presets from 70 % to 200 %. The bottom of the list has <em>Set as default size</em>, which saves the current window size for future plugin instances.</li>
-  <li><strong>About</strong> — version information and build details.</li>
+  <li><strong>Size</strong> — a hover flyout listing UI-scale presets from 70 % to 300 % (70, 80, 90, 100, 110, 120, 130, 150, 170, 200, 250, 300). The bottom of the list has <em>Set as default size</em>, which saves the current window dimensions to a small <code>window_size.cfg</code> file in the plugin's user folder. That file is read on startup, so the plugin always opens with your preferred size across every DAW and every project, without needing to save the host project first.</li>
   <li><strong>Check for updates</strong> — queries GitHub for a newer release. See <a href="#check-updates">§4.5</a>.</li>
-  <li><strong>Show pop-ups</strong> — toggles all hover tooltips on and off. Useful for screen recordings where tooltip flicker is distracting. The setting is remembered across sessions.</li>
+  <li><strong>Show pop-ups</strong> — toggles all hover tooltips on and off. Useful for screen recordings where tooltip flicker is distracting. The setting is remembered across sessions. Clicking this item closes the menu immediately.</li>
+  <li><strong>About</strong> — version information and build details.</li>
 </ul>
 
 <h3 id="presets">4.3 Preset Browser</h3>
@@ -758,7 +782,7 @@ The fastest way to hear the difference between the two engines is to load the sa
 <ul>
   <li><strong>Search box</strong> — filters the visible list as you type.</li>
   <li><strong>Init</strong> — loads the factory default state.</li>
-  <li><strong>Save Preset…</strong> — writes the current state to a user XML file in <code>%APPDATA%\PEJVAK RVB\Presets\</code> (Windows) or <code>~/.config/PEJVAK RVB/Presets/</code> (macOS / Linux).</li>
+  <li><strong>Save Preset…</strong> — writes the current state to a user XML file in <code>%APPDATA%\PEJVAK RVB\Presets\</code> (Windows) or <code>~/.config/PEJVAK RVB/Presets/</code> (macOS / Linux). The <code>window_size.cfg</code> file lives in the same directory.</li>
   <li><strong>Load Preset…</strong> — reads a user XML preset from disk.</li>
   <li><strong>User Presets</strong> — a section listing every <code>.xml</code> file you have saved.</li>
 </ul>
@@ -783,7 +807,7 @@ Loading a preset from an older version is safe: the XML format is append-only, a
   <li><strong>Download</strong> — pulls the installer for the current platform:
     <div class="diagram">Windows: PEJVAK-RVB-windows-x64-setup.exe
 macOS:   PEJVAK-RVB-macos-universal.pkg
-Linux:   PEJVAK-RVB-linux-x64.tar.gz</div>
+Linux:   PEJVAK-RVB-linux-x64.deb (or .tar.gz on non-Debian)</div>
   </li>
   <li><strong>Verify</strong> — computes the SHA-256 of the downloaded file as it streams, then compares it against the immutable digest published by GitHub. A mismatch deletes the partial file and refuses the install. A release that does not carry a digest is also rejected.</li>
   <li><strong>Install</strong> — shows a <em>Open Installer</em> button. You must tick an explicit confirmation checkbox before the plugin will run a downloaded binary.</li>
@@ -927,7 +951,7 @@ overlay only appears for the latter.
 │ NETWORK ★        │ CHARACTER ★      │ MODULATION ★     │
 │ [HOUSE|VELVET]   │ Cross, Sat,      │ Damping,         │
 │                  │ TiltFrq, TiltAmt │ ModAmt, ModRate  │
-│                  │ [Sat][Tilt]      │                  │
+│                  │ [Sat][Tilt]      │ MatrixAmt/Rate   │
 ├──────────────────┼──────────────────┼──────────────────┤
 │ FILTER ★         │ MIXER (4 faders) │ DYNAMICS ★       │
 │                  │ Dry, Early,      │ Attack, Ducking, │
@@ -976,12 +1000,37 @@ Early reflections are always on when the CHARACTER card is on. Their level is co
 </table>
 
 <h3 id="ffdn-modulation">6.5 MODULATION ★</h3>
+<p>Two rows of knobs. The first row shapes the master high-frequency damping and the delay-line modulation; the second row controls the <strong>Time-Varying Feedback Matrix</strong>.</p>
+
 <table>
   <tr><th>Control</th><th>Range</th><th>Description</th></tr>
   <tr><td>Damping</td><td>500 – 20 000 Hz</td><td>One-pole low-pass inside every delay line. This is the primary HF shaper — use it before reaching for Loop LP.</td></tr>
-  <tr><td>Mod Amt</td><td>0 – 3 ms</td><td>LFO depth on each line. 0 = static tail.</td></tr>
-  <tr><td>Mod Rate</td><td>0.1 – 5 Hz</td><td>LFO speed.</td></tr>
+  <tr><td>Mod Amt</td><td>0 – 3 ms</td><td>LFO depth on each delay line. 0 = static tail.</td></tr>
+  <tr><td>Mod Rate</td><td>0.1 – 5 Hz</td><td>LFO speed for the per-line delay modulation.</td></tr>
 </table>
+
+<h3 id="ffdn-tvmatrix">6.5b TIME-VARYING MATRIX</h3>
+<p>A second pair of knobs under the MODULATION card:</p>
+<table>
+  <tr><th>Control</th><th>Range</th><th>Description</th></tr>
+  <tr><td>Matrix Amt</td><td>0 – 100 %</td><td>Depth of the time-varying Givens rotation applied to pairs of delay lines. At <strong>0 %</strong> the matrix is fully static and the engine is bit-identical to the previous release. As the value rises, the feedback matrix rotates further on every LFO cycle, producing a lush, evolving, decorrelated tail without any of the metallic ringing that a static matrix exhibits.</td></tr>
+  <tr><td>Matrix Rate</td><td>0.01 – 2.0 Hz</td><td>Speed of the Givens rotation. The rotation is driven by a <em>continuous sine wave</em>, not a sawtooth. This is important: a sawtooth would introduce a phase jump every cycle, and the resulting discontinuity would be audible as a click at high modulation depths. The sine-driven approach is what makes the modulation usable at 100 % Amt without artifacts.</td></tr>
+</table>
+
+<div class="note">
+The Time-Varying Matrix rotates in-place with a pre-computed <code>sin/cos</code>
+pair, so it costs only a handful of multiplies per sample per pair of
+delay lines. It has no effect when <strong>Matrix Amt</strong> is exactly
+0 % — at that point the code path is skipped entirely.
+</div>
+
+<div class="tip">
+A subtle <strong>Matrix Amt</strong> of 10–20 % with a slow
+<strong>Matrix Rate</strong> of 0.05–0.15 Hz is the sweet spot for
+long, evolving halls. Higher values (50 %+) produce a distinctly
+"alive" tail — useful for ambient textures and for breaking up
+metallic resonances on dense source material.
+</div>
 
 <h3 id="ffdn-filter">6.6 FILTER ★</h3>
 <table>
@@ -1115,6 +1164,7 @@ Placing SHIMMER last produces a smooth, top-down wash. Placing it first adds the
 <ul>
   <li><strong>Click once</strong> — remembers the enable-state of every layer, then turns them all off. The button pulses red to signal that the lock is active.</li>
   <li><strong>Click again</strong> — restores the exact enable-state that was captured.</li>
+  <li>The TX button is <strong>always</strong> togglable, even when every layer is already off. This lets you use it as a "lock" that blocks further changes to the layer switches from being pushed through by an accidental click or by host automation.</li>
   <li>While the lock is active, the individual per-card enable switches are disabled. They show a soft red tone and their tooltip explains how to release the lock.</li>
   <li>Undo and redo both cooperate with the TX lock: undoing past the moment it was engaged automatically unlocks it.</li>
 </ul>
@@ -1148,7 +1198,7 @@ Placing SHIMMER last produces a smooth, top-down wash. Placing it first adds the
 <!-- ============ 11. AUTOMATION ============ -->
 <section id="automation">
 <h2>11. Automation</h2>
-<p>Every parameter — including the Texture Rack, ILLUSION, and the FFDN engine — is exposed to the host for automation. Parameter IDs follow the CloudSeed XML naming scheme so presets port cleanly between the plugin and the original CloudSeed.</p>
+<p>Every parameter — including the Texture Rack, ILLUSION, the FFDN engine, and the new Time-Varying Matrix controls — is exposed to the host for automation. Parameter IDs follow the CloudSeed XML naming scheme so presets port cleanly between the plugin and the original CloudSeed.</p>
 
 <h3>Parameter names</h3>
 <p>Every parameter is exposed under a stable DAW-visible name. Two entries use descriptive names that reflect what the control actually does:</p>
@@ -1179,6 +1229,13 @@ Placing SHIMMER last produces a smooth, top-down wash. Placing it first adds the
   <li>If you see a <strong>PLUGIN DISABLED</strong> overlay, the DAW has taken the plugin offline — reactivate it in the host.</li>
 </ul>
 
+<h3>DAW shortcuts do not work while the plugin window is focused</h3>
+<ul>
+  <li>This is intentional for some keys: while a parameter text field is being edited, forwarding is disabled so you can type freely. Press <kbd>Enter</kbd> or <kbd>Esc</kbd> to exit the text field and forwarding resumes.</li>
+  <li>If <kbd>Space</kbd> is not reaching the DAW at all, check that the host's own "allow plugin windows to steal keyboard focus" preference (if it has one) is enabled.</li>
+  <li>Some DAWs on Wayland forward keys to the OS compositor before the plugin window; try launching the host with <code>GDK_BACKEND=x11</code>.</li>
+</ul>
+
 <h3>Reverb tail is too short</h3>
 <ul>
   <li>Increase <strong>Decay</strong> (FFDN) or <strong>Decay</strong> in LATE DELAY (CloudSeed).</li>
@@ -1191,6 +1248,13 @@ Placing SHIMMER last produces a smooth, top-down wash. Placing it first adds the
 <ul>
   <li>Check that the Mix knob is not being automated to jump between 0 and a high value instantaneously. Use a short ramp in the host.</li>
   <li>Make sure no other plugin in the signal chain is producing the click.</li>
+</ul>
+
+<h3>Clicks when using the Time-Varying Matrix</h3>
+<p>The matrix is driven by a continuous sine wave, so it should never click. If it does:</p>
+<ul>
+  <li>Check that <strong>Matrix Rate</strong> is not being automated with a stepwise envelope.</li>
+  <li>Reduce <strong>Matrix Amt</strong> below 20 % — at very high amounts the LFO phase can cross zero between host automation steps and produce a faint zipper.</li>
 </ul>
 
 <h3>Plugin crashes or hangs in the DAW</h3>
@@ -1208,7 +1272,7 @@ Placing SHIMMER last produces a smooth, top-down wash. Placing it first adds the
 </ul>
 
 <h3>macOS: "Plugin cannot be opened because the developer cannot be verified"</h3>
-<p>This is standard Gatekeeper behaviour for unsigned binaries. The PKG installer already removes the quarantine attribute, but if your DAW still blocks the plugin:</p>
+<p>This is standard Gatekeeper behaviour for unsigned binaries. The PKG installer already handles the quarantine attribute, but if your DAW still blocks the plugin after a manual ZIP install:</p>
 <ul>
   <li>Open <strong>System Settings</strong> → <strong>Privacy &amp; Security</strong>.</li>
   <li>Scroll down to the security section. You should see a message about <code>PEJVAK RVB</code> being blocked.</li>
@@ -1218,7 +1282,7 @@ Placing SHIMMER last produces a smooth, top-down wash. Placing it first adds the
 
 <h3>macOS: plugin does not appear in the DAW after installation</h3>
 <ul>
-  <li>Confirm the PKG installed the plugin to <code>~/Library/Audio/Plug-Ins/VST3/</code> (user) or <code>/Library/Audio/Plug-Ins/VST3/</code> (system).</li>
+  <li>Confirm the PKG installed the plugin to <code>/Library/Audio/Plug-Ins/VST3/</code> (system) or <code>~/Library/Audio/Plug-Ins/VST3/</code> (user, after a manual ZIP install).</li>
   <li>Some DAWs (Ableton, Reaper, Bitwig) require you to add the folder to their plugin search path manually.</li>
   <li>Rescan plugins from the DAW's preferences. On Logic Pro, use <strong>Logic Pro → Settings → Plug-in Manager</strong> and click <strong>Reset &amp; Rescan Selection</strong>.</li>
 </ul>
@@ -1234,10 +1298,13 @@ you see rendering glitches, try launching the DAW with XWayland:</p>
 <div class="diagram">GDK_BACKEND=x11 your-daw</div>
 
 <h3>Text is too small / too large</h3>
-<p>Open the ☰ menu, pick <strong>Size</strong>, and choose a preset from 70 % to 200 %. You can also drag the bottom-right corner of the plugin window to resize it freely; the aspect ratio is locked so the layout never breaks.</p>
+<p>Open the ☰ menu, pick <strong>Size</strong>, and choose a preset from 70 % to 300 % (the range now includes 250 % and 300 % for high-DPI displays). You can also drag the bottom-right corner of the plugin window to resize it freely; the aspect ratio is locked to 1100:570 so the layout never breaks. Use <em>Set as default size</em> at the bottom of the Size submenu to save your preferred dimensions for all future instances.</p>
 
 <h3>Tooltips get in the way</h3>
 <p>Open the ☰ menu and toggle <strong>Show pop-ups</strong> off. All hover tooltips will be suppressed until you toggle it back on.</p>
+
+<h3>Window opens at the wrong size</h3>
+<p>If you have resized the plugin and want it to remember that size globally (across every DAW and every project), open <strong>☰ → Size → Set as default size</strong>. This writes a small <code>window_size.cfg</code> file to the plugin's user folder. The plugin reads it on startup and opens at exactly that size, without needing to save the host project first.</p>
 
 <h3>Windows SmartScreen warns about the installer</h3>
 <p>Click <strong>More info → Run anyway</strong>. The installer is not yet Authenticode-signed, so SmartScreen shows a warning the first time you run it. This is expected; the SHA-256 verification in the built-in updater guarantees integrity even without code signing.</p>
@@ -1280,6 +1347,7 @@ you see rendering glitches, try launching the DAW with XWayland:</p>
     </a>
   </li>
   <li>FFDN theory: Fagerström et al., "Velvet-Noise Feedback Delay Network" (DAFx 2020); Schlecht &amp; Habets, "Feedback Delay Networks" (IEEE TSP 2017).</li>
+  <li>Time-Varying Matrix: Givens rotation technique, standard in modern FDN implementations (Valhalla, Cinematic Rooms, Tai Chi).</li>
   <li>Velvet-noise diffusion: Välimäki et al. (IEEE/ACM TASLP 2017).</li>
   <li>Sine-shaper saturation: Zölzer, <em>DAFX</em>.</li>
   <li>Granular design: Curtis Roads, <em>Microsound</em> (MIT Press, 2001).</li>
@@ -1289,9 +1357,11 @@ you see rendering glitches, try launching the DAW with XWayland:</p>
 <ul>
   <li>Rust 1.98+</li>
   <li>nice-plug 0.4.2 — plugin framework</li>
-  <li>egui 0.36 — user interface</li>
-  <li>wide 1.6 — portable SIMD</li>
-  <li>ureq 2.10 — HTTPS client for the built-in updater</li>
+  <li>nice-plug-egui 0.6.0 — egui integration</li>
+  <li>egui 0.37 — user interface</li>
+  <li>wide 1.7.1 — portable SIMD</li>
+  <li>ureq 3.3.0 — HTTPS client for the built-in updater</li>
+  <li>sha2 0.11.1 — SHA-256 verification for the updater</li>
 </ul>
 
 <h3>License</h3>

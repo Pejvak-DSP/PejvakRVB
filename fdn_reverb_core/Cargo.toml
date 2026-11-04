@@ -1,6 +1,6 @@
 [package]
 name = "fdn_reverb_core"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2021"
 authors = ["Amin Yousefinejad"]
 description = "PEJVAK RVB – Pejvak DSP Core Engine"
@@ -10,6 +10,4 @@ homepage = "https://github.com/Pejvak-DSP"
 
 [dependencies]
 # Portable SIMD: f64x4 maps to AVX2/AVX-512 on x86_64 and NEON on ARM.
-# Used only for operations that are bit-exact with scalar code (elementwise
-# mul/add on independent data, no FMA, no reassociation).
-wide = "1.6"
+wide = "1.7.1"

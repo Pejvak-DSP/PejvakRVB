@@ -18,10 +18,31 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Install System Dependencies (needed for egui/baseview)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev libxcursor-dev libxcb-dri2-0-dev \
+            libxcb-icccm4-dev libx11-xcb-dev mesa-common-dev \
+            libgl1-mesa-dev libglu1-mesa-dev libasound2-dev
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+
+      - name: Verify tag matches Cargo.toml version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          CARGO_VERSION=$(grep -m1 '^version = ' Pejvak_RVB/Cargo.toml | sed -E 's/^version = "([^"]+)".*/\1/')
+          echo "Tag version:   $TAG_VERSION"
+          echo "Cargo version: $CARGO_VERSION"
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "❌ Tag $GITHUB_REF_NAME does not match Pejvak_RVB/Cargo.toml version $CARGO_VERSION"
+            exit 1
+          fi
+          echo "✅ Versions match"
 
       - name: Run DSP tests
         run: cargo test -p fdn_reverb_core
@@ -121,7 +142,12 @@ jobs:
           Name: "clap"; Description: "CLAP plugin — Bitwig, Reaper 7+"; Types: full
 
           [Files]
-          Source: "target\bundled\Pejvak_RVB.vst3"; DestDir: "{commoncf}\VST3\PEJVAK RVB"; Components: vst3; Flags: ignoreversion recursesubdirs createallsubdirs
+          ; Copy the CONTENTS of the Pejvak_RVB.vst3 bundle directory into a
+          ; folder that ends with ".vst3". This is the VST3 specification
+          ; requirement: the top-level directory MUST end with ".vst3" so
+          ; that strict DAWs (Cubase, Nuendo, Studio One) can locate the
+          ; plugin by its bundle name.
+          Source: "target\bundled\Pejvak_RVB.vst3\*"; DestDir: "{commoncf}\VST3\Pejvak_RVB.vst3"; Components: vst3; Flags: ignoreversion recursesubdirs createallsubdirs
           Source: "target\bundled\Pejvak_RVB.clap"; DestDir: "{commoncf}\CLAP"; Components: clap; Flags: ignoreversion recursesubdirs createallsubdirs
 
           [Icons]
@@ -138,7 +164,7 @@ jobs:
           ;   user can launch the DAW (nowait would race with installation).
           ; * Two separate calls: the VST3 is a directory tree, the CLAP
           ;   is a single file, so they need different -Path arguments.
-          Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Get-ChildItem -LiteralPath '{commoncf}\VST3\PEJVAK RVB' -Recurse -ErrorAction SilentlyContinue | Unblock-File; Get-ChildItem -LiteralPath '{commoncf}\CLAP' -Filter 'Pejvak_RVB.clap' -ErrorAction SilentlyContinue | Unblock-File"""; Flags: runhidden waituntilterminated
+          Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Get-ChildItem -LiteralPath '{commoncf}\VST3\Pejvak_RVB.vst3' -Recurse -ErrorAction SilentlyContinue | Unblock-File; Get-ChildItem -LiteralPath '{commoncf}\CLAP' -Filter 'Pejvak_RVB.clap' -ErrorAction SilentlyContinue | Unblock-File"""; Flags: runhidden waituntilterminated
           Filename: "{#UpdateURL}"; Description: "Open the project page"; Flags: postinstall shellexec nowait runasoriginaluser
           '@
 
@@ -190,22 +216,31 @@ jobs:
           -------------------
           1. Create the plugin folders if they do not exist:
 
-               C:\Program Files\Common Files\VST3\PEJVAK RVB\
+               C:\Program Files\Common Files\VST3\
                C:\Program Files\Common Files\CLAP\
 
              (You will need administrator rights for these.)
 
-          2. Copy Pejvak_RVB.vst3 to:
-               C:\Program Files\Common Files\VST3\PEJVAK RVB\
+          2. Copy the entire Pejvak_RVB.vst3 FOLDER to:
 
-          3. Copy Pejvak_RVB.clap to:
+               C:\Program Files\Common Files\VST3\
+
+             The final structure MUST be:
+
+               C:\Program Files\Common Files\VST3\Pejvak_RVB.vst3\Contents\x86_64-win\Pejvak_RVB.vst3
+
+             The top-level folder name must end with ".vst3" — that is
+             how DAWs locate VST3 plugins.
+
+          3. Copy the Pejvak_RVB.clap FILE to:
+
                C:\Program Files\Common Files\CLAP\
 
           4. Open your DAW and rescan plugins.
 
           REMOVING
           --------
-          Simply delete the folders above.
+          Simply delete the two paths above.
 
           If Windows Defender warns about the files, right-click the
           extracted folder and choose Properties > Unblock. Or run
@@ -292,6 +327,20 @@ jobs:
           done
           find "$BUNDLE_DIR" -type f -path "*/Contents/MacOS/*" -exec lipo -info {} \;
 
+      # Ad-hoc codesign the bundles. Apple Silicon (arm64) refuses to
+      # load unsigned binaries. `cargo` used to sign automatically on
+      # older macOS, but the safe path is to sign explicitly after
+      # lipo/strip, which invalidates any pre-existing signature.
+      # `-s -` means ad-hoc signing, which requires no certificate.
+      - name: Ad-hoc sign universal bundles
+        run: |
+          codesign --force --deep -s - "$BUNDLE_DIR/Pejvak_RVB.vst3"
+          codesign --force --deep -s - "$BUNDLE_DIR/Pejvak_RVB.clap"
+          echo "=== VST3 signature ==="
+          codesign -dv "$BUNDLE_DIR/Pejvak_RVB.vst3" 2>&1 | head -5
+          echo "=== CLAP signature ==="
+          codesign -dv "$BUNDLE_DIR/Pejvak_RVB.clap" 2>&1 | head -5
+
       - name: Create Portable ZIP
         run: |
           mkdir -p portable
@@ -358,6 +407,13 @@ jobs:
 
       - name: Create PKG payload
         run: |
+          # NOTE: The PKG installs system-wide to /Library/Audio/Plug-Ins/.
+          # This requires administrator privileges (the standard macOS
+          # installer prompt handles that automatically).
+          #
+          # For per-user installation (~/Library/Audio/Plug-Ins/), users
+          # should use the portable ZIP instead and copy the files
+          # manually — that path is documented in the ZIP's README.txt.
           mkdir -p payload/Library/Audio/Plug-Ins/VST3
           mkdir -p payload/Library/Audio/Plug-Ins/CLAP
           cp -R "portable/Pejvak_RVB.vst3" payload/Library/Audio/Plug-Ins/VST3/
@@ -382,12 +438,21 @@ jobs:
           body{font-family:-apple-system,sans-serif;font-size:13px;color:#1d1d1f;padding:20px}
           h1{font-size:20px;color:#007aff;margin-top:0}p{line-height:1.5;margin:12px 0}
           code{background:#f0f0f0;padding:2px 6px;border-radius:4px;font-size:12px}
+          .note{background:#fff8e1;border-left:3px solid #ffa000;padding:8px 12px;margin:12px 0;font-size:12px}
           </style></head><body>
           <h1>PEJVAK RVB</h1>
           <p><strong>Hybrid Algorithmic Reverb — Dual Engine. Pure Rust.</strong></p>
-          <p>This installer places:</p>
-          <p><code>~/Library/Audio/Plug-Ins/VST3/Pejvak_RVB.vst3</code><br>
-             <code>~/Library/Audio/Plug-Ins/CLAP/Pejvak_RVB.clap</code></p>
+          <p>This installer places the plugin files in the system-wide
+             plug-in folders:</p>
+          <p><code>/Library/Audio/Plug-Ins/VST3/Pejvak_RVB.vst3</code><br>
+             <code>/Library/Audio/Plug-Ins/CLAP/Pejvak_RVB.clap</code></p>
+          <div class="note">
+            <strong>Note:</strong> System-wide installation requires
+            administrator privileges. The macOS installer will prompt
+            for your password. If you prefer a per-user installation
+            (in <code>~/Library/Audio/Plug-Ins/</code>), download the
+            portable ZIP from the Releases page instead.
+          </div>
           <p>Rescan plugins in your DAW. The plugin appears as <strong>PEJVAK RVB</strong>.</p>
           </body></html>
           HTML
@@ -519,7 +584,7 @@ jobs:
 
           REMOVING
           --------
-          Simply delete the two files above.
+          Simply delete the two paths above.
 
           SYSTEM DEPENDENCIES
           -------------------

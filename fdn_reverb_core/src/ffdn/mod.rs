@@ -233,31 +233,7 @@ pub struct FfdnCore {
     /// Crossover frequency of the high shelf (Hz).
     treble_freq: f64,
 
-    // ================================================================
-    // FFDN CHARACTER — extensions added in
-    // ================================================================
-    //
-    // These controls extend the FFDN beyond its original "pure
-    // network" character:
-    //
-    //   * cross_feed  — how much the L and R networks share their
-    //                   input, from fully independent (0) to fully
-    //                   mono-summed (1).
-    //   * drive       — soft saturation applied inside the feedback
-    //                   loop. Bounds the peak and slightly compresses
-    //                   the tail, adding a natural "analog" character.
-    //   * tilt_*      — a spectral tilt filter (low shelf + high
-    //                   shelf with opposite gains) applied to the wet
-    //                   output. Lets the tail lean bass-heavy or
-    //                   treble-heavy without touching the decay time.
-    //   * er_level    — how much of the pre-network signal (i.e. the
-    //                   input as it enters the FDN) is mixed directly
-    //                   into the wet output, giving a controllable
-    //                   "early reflection" character.
-    //
-    // Each of the three "extra" effects has an enable switch so that
-    // a fresh FFDN instance with all defaults is bit-identical to the
-    // pre- engine.
+    // ---- FFDN CHARACTER ---
     cross_feed: f64,
     drive: f64,
     tilt_freq: f64,
@@ -266,6 +242,12 @@ pub struct FfdnCore {
     drive_enabled: bool,
     tilt_enabled: bool,
     er_enabled: bool,
+
+    // ---- Time-Varying Matrix ---
+    matrix_mod_amount: f64,
+    matrix_lfo_phase: f64,
+    matrix_lfo_inc: f64,
+
     // Tilt filters (low shelf + high shelf per channel). Two biquads
     // per channel are required because the tilt is a *shelf pair*, not
     // a single biquad. The state must be preserved across blocks so we
@@ -276,7 +258,7 @@ pub struct FfdnCore {
     tilt_high_r: Biquad,
 
     // ================================================================
-    // FFDN NETWORK / FILTER / DYNAMICS// ================================================================
+    // FFDN NETWORK / FILTER / DYNAMICS//
     //
     // Nine parameters, stored by the plugin layer and forwarded here
     // through the controller's pass-through setters. NETWORK and
@@ -416,6 +398,12 @@ impl FfdnCore {
             drive_enabled: false,
             tilt_enabled: false,
             er_enabled: false,
+
+            // ---- Time-Varying Matrix ---
+            matrix_mod_amount: 0.0,
+            matrix_lfo_phase: 0.0,
+            matrix_lfo_inc: 0.0,
+
             tilt_low_l,
             tilt_high_l,
             tilt_low_r,
@@ -663,6 +651,32 @@ impl FfdnCore {
             self.net_l
                 .matrix
                 .apply(&self.net_l.line_out[..num], &mut self.net_l.line_in[..num]);
+
+            // Apply time-varying Givens rotation
+            if self.matrix_mod_amount > 0.0 {
+                self.matrix_lfo_phase += self.matrix_lfo_inc;
+                if self.matrix_lfo_phase >= 1.0 {
+                    self.matrix_lfo_phase -= 1.0;
+                }
+                // Use a continuous sine wave LFO and scale the angle
+                let lfo_val = (self.matrix_lfo_phase * std::f64::consts::TAU).sin();
+                let angle = lfo_val * self.matrix_mod_amount * std::f64::consts::PI;
+                let (sin_val, cos_val) = angle.sin_cos();
+                
+                for j in (0..num).step_by(2) {
+                    let x0 = self.net_l.line_in[j];
+                    let x1 = if j + 1 < num {
+                        self.net_l.line_in[j + 1]
+                    } else {
+                        0.0
+                    };
+                    self.net_l.line_in[j] = x0 * cos_val - x1 * sin_val;
+                    if j + 1 < num {
+                        self.net_l.line_in[j + 1] = x0 * sin_val + x1 * cos_val;
+                    }
+                }
+            }
+
             for j in 0..num {
                 let mut new_val = in_l * self.net_l.density_gains[j]
                     + self.net_l.line_in[j] * self.net_l.feedback[j];
@@ -685,6 +699,28 @@ impl FfdnCore {
             self.net_r
                 .matrix
                 .apply(&self.net_r.line_out[..num], &mut self.net_r.line_in[..num]);
+
+            // Apply time-varying Givens rotation
+            if self.matrix_mod_amount > 0.0 {
+                // Use a continuous sine wave LFO and scale the angle
+                let lfo_val = (self.matrix_lfo_phase * std::f64::consts::TAU).sin();
+                let angle = lfo_val * self.matrix_mod_amount * std::f64::consts::PI;
+                let (sin_val, cos_val) = angle.sin_cos();
+                
+                for j in (0..num).step_by(2) {
+                    let x0 = self.net_r.line_in[j];
+                    let x1 = if j + 1 < num {
+                        self.net_r.line_in[j + 1]
+                    } else {
+                        0.0
+                    };
+                    self.net_r.line_in[j] = x0 * cos_val - x1 * sin_val;
+                    if j + 1 < num {
+                        self.net_r.line_in[j + 1] = x0 * sin_val + x1 * cos_val;
+                    }
+                }
+            }
+
             for j in 0..num {
                 let mut new_val = in_r * self.net_r.density_gains[j]
                     + self.net_r.line_in[j] * self.net_r.feedback[j];
@@ -1039,6 +1075,11 @@ impl FfdnCore {
     /// Enables or disables the early-reflection mix.
     pub fn set_er_enabled(&mut self, enabled: bool) {
         self.er_enabled = enabled;
+    }
+
+    pub fn set_matrix_modulation(&mut self, amount: f64, rate_hz: f64) {
+        self.matrix_mod_amount = amount.clamp(0.0, 1.0);
+        self.matrix_lfo_inc = (rate_hz / self.sample_rate).max(0.0);
     }
 
     /// Recomputes the tilt biquad coefficients from the current

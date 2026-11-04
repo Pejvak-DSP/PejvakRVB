@@ -67,10 +67,11 @@ const USER_AGENT: &str = concat!("PEJVAK-RVB/", env!("CARGO_PKG_VERSION"));
 /// We also set a fixed User-Agent here so every request carries the
 /// same identifier without repeating the header at each call site.
 fn http_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
+    ureq::Agent::config_builder()
         .https_only(true)
         .user_agent(USER_AGENT)
         .build()
+        .new_agent()
 }
 
 // ============================================================================
@@ -153,13 +154,16 @@ fn check_inner() -> CheckResult {
         "https://api.github.com/repos/{}/{}/releases/latest",
         GITHUB_OWNER, GITHUB_REPO
     );
-    let resp = http_agent()
+    let mut resp = http_agent()
         .get(&url)
-        .set("Accept", "application/vnd.github+json")
+        .header("Accept", "application/vnd.github+json")
         .call()
         .map_err(|e| format!("HTTP error: {e}"))?;
 
-    let json: serde_json::Value = resp.into_json().map_err(|e| format!("JSON parse: {e}"))?;
+    let json: serde_json::Value = resp
+        .body_mut()
+        .read_json()
+        .map_err(|e| format!("JSON parse: {e}"))?;
 
     let tag = json
         .get("tag_name")
@@ -212,17 +216,12 @@ fn check_inner() -> CheckResult {
 
             match os {
                 "windows" => find(&|l| {
-                    (l.contains("windows") || l.contains("win"))
-                        && l.ends_with("-setup.exe")
+                    (l.contains("windows") || l.contains("win")) && l.ends_with("-setup.exe")
                 }),
-                "macos" => find(&|l| {
-                    (l.contains("macos") || l.contains("darwin"))
-                        && l.ends_with(".pkg")
-                }),
-                "linux" => find(&|l| {
-                    l.contains("linux") && l.ends_with(".deb")
-                })
-                .or_else(|| {
+                "macos" => {
+                    find(&|l| (l.contains("macos") || l.contains("darwin")) && l.ends_with(".pkg"))
+                }
+                "linux" => find(&|l| l.contains("linux") && l.ends_with(".deb")).or_else(|| {
                     // Fallback: distros that are not Debian-based
                     // will not be able to `dpkg -i` the .deb, so
                     // fall through to the tarball.
@@ -315,11 +314,9 @@ pub fn download_installer(
     std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir: {e}"))?;
     let path = dir.join(asset_name);
 
-    // Stream + hash in one pass: no second read of the file, no full
-    // buffer in memory. Installer files are small, but this keeps
-    // memory usage constant regardless of the asset size.
     let mut file = std::fs::File::create(&path).map_err(|e| format!("create: {e}"))?;
-    let mut reader = resp.into_reader();
+    // use into_body().into_reader() to take ownership of the body
+    let mut reader = resp.into_body().into_reader();
     let mut hasher = sha2::Sha256::new();
     let mut buf = [0u8; 8192];
 
@@ -341,7 +338,8 @@ pub fn download_installer(
     drop(file);
 
     use sha2::Digest;
-    let actual_hex = format!("{:x}", hasher.finalize());
+    let hash_bytes = hasher.finalize();
+    let actual_hex: String = hash_bytes.iter().map(|b| format!("{:02x}", b)).collect();
 
     if actual_hex != expected_hex {
         let _ = std::fs::remove_file(&path);
