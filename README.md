@@ -139,7 +139,7 @@ The **Check for Updates** menu option is designed to be safe by default:
 ## 📸 Screenshots
 
 <div align="center">
-  <img src="screenshots/main.png" alt="CloudSeed Engine" width="800"/>
+  <img src="screenshots/cloud.png" alt="CloudSeed Engine" width="800"/>
   <br>
   <i>CloudSeed Engine — Warm and Dense</i>
 </div>
